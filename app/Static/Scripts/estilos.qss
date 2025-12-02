@@ -1,0 +1,133 @@
+/* ===== VENTANA PRINCIPAL ===== */
+QMainWindow {
+    background-color: #111;
+    color: #e0e0e0;
+}
+
+/* ===== BARRA DE HERRAMIENTAS - BOTONES ===== */
+QPushButton {
+    background-color: #2b2b2b;
+    color: #e0e0e0;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 8px 16px;
+    font-weight: bold;
+    min-width: 80px;
+}
+
+QPushButton:hover {
+    background-color: #3a3a3a;
+    border-color: #555;
+}
+
+QPushButton:checked {
+    background-color: #1a73e8;
+    color: white;
+    border-color: #1a73e8;
+}
+
+/* ===== BARRA DE MENÚ (QMenuBar) ===== */
+QMenuBar {
+    background-color: #2b2b2b;
+    color: #e0e0e0;
+    border-bottom: 1px solid #444;
+    padding: 2px;
+}
+
+QMenuBar::item {
+    background-color: transparent;
+    padding: 4px 10px;
+    margin: 2px;
+    border-radius: 4px;
+}
+
+QMenuBar::item:selected {
+    background-color: #3a3a3a;
+}
+
+QMenuBar::item:pressed {
+    background-color: #1a73e8;
+}
+
+/* ===== MENÚS DESPLEGABLES (QMenu) ===== */
+QMenu {
+    background-color: #2b2b2b;
+    color: #e0e0e0;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 5px;
+}
+
+QMenu::item {
+    background-color: transparent;
+    padding: 5px 20px 5px 20px;
+    border-radius: 3px;
+    margin: 2px;
+}
+
+QMenu::item:selected {
+    background-color: #1a73e8;
+    color: white;
+}
+
+QMenu::separator {
+    height: 1px;
+    background-color: #444;
+    margin: 5px;
+}
+
+/* ===== BARRA DE ESTADO (QStatusBar) ===== */
+QStatusBar {
+    background-color: #2b2b2b;
+    color: #e0e0e0;
+    border-top: 1px solid #444;
+}
+
+/* ===== ÁREA DE TRABAJO (QGraphicsView) ===== */
+QGraphicsView#marco_trabajo {
+    background-color: #1e1e1e;
+    border: 1px solid #444;
+    border-radius: 2px;
+}
+
+/* ===== PANEL LATERAL - QGroupBox ===== */
+QGroupBox {
+    background-color: #111;
+    color: #e0e0e0;
+    border: 2px solid #2b2b2b;
+    border-radius: 5px;
+    margin-top: 10px;
+    padding-top: 10px;
+    font-weight: bold;
+}
+
+/* ===== LISTAS (Nodos y Rutas) ===== */
+QListWidget {
+    background-color: #1e1e1e;
+    color: #e0e0e0;
+    border: 1px solid #444;
+    border-radius: 3px;
+}
+
+QListWidget::item:selected {
+    background-color: #1a73e8;
+    color: white;
+}
+
+/* ===== TABLA DE PROPIEDADES ===== */
+QTableWidget {
+    background-color: #1e1e1e;
+    color: #e0e0e0;
+    border: 1px solid #444;
+    border-radius: 3px;
+    gridline-color: #333;
+}
+
+QHeaderView::section {
+    background-color: #2b2b2b;
+    color: #e0e0e0;
+    padding: 5px;
+    border: none;
+    border-right: 1px solid #444;
+    border-bottom: 1px solid #444;
+}
