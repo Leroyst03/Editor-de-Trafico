@@ -1356,7 +1356,7 @@ class EditorController(QObject):
                 if isinstance(origen, dict) and 'id' in origen:
                     origen_id = origen['id']
                     
-                    # Buscar el nodo ACTUAL en el proyecto - VERSIÓN CORREGIDA
+                    # Buscar el nodo ACTUAL en el proyecto
                     nodo_actual = None
                     for nodo in getattr(self.proyecto, "nodos", []):
                         try:
@@ -1381,7 +1381,7 @@ class EditorController(QObject):
                             origen['Y'] = nodo_actual.get('Y', origen.get('Y', 0))
                         ruta_dict["origen"] = origen
             
-            # 2. NORMALIZAR DESTINO - Misma lógica corregida
+            # 2. NORMALIZAR DESTINO 
             destino = ruta_dict.get("destino")
             if destino:
                 if isinstance(destino, dict) and 'id' in destino:
@@ -1403,7 +1403,7 @@ class EditorController(QObject):
                             continue
                     
                     if nodo_actual:
-                        # CORRECCIÓN: Actualizar las coordenadas del destino con las del nodo actual
+                        # Actualizar las coordenadas del destino con las del nodo actual
                         if hasattr(nodo_actual, 'get'):
                             destino['X'] = nodo_actual.get('X')
                             destino['Y'] = nodo_actual.get('Y')
@@ -1412,7 +1412,7 @@ class EditorController(QObject):
                             destino['Y'] = nodo_actual.get('Y', destino.get('Y', 0))
                         ruta_dict["destino"] = destino
             
-            # 3. NORMALIZAR VISITA - Versión corregida
+            # 3. NORMALIZAR VISITA
             visita = ruta_dict.get("visita", []) or []
             nueva_visita = []
             
@@ -1420,11 +1420,11 @@ class EditorController(QObject):
                 if isinstance(v, dict) and 'id' in v:
                     visita_id = v['id']
                     
-                    # Buscar el nodo ACTUAL en el proyecto - VERSIÓN CORREGIDA
+                    # Buscar el nodo ACTUAL en el proyecto
                     nodo_actual = None
                     for nodo in getattr(self.proyecto, "nodos", []):
                         try:
-                            # CORRECCIÓN: Usar nodo.get() para objetos Nodo
+                            # Usar nodo.get() para objetos Nodo
                             if hasattr(nodo, 'get'):
                                 if nodo.get('id') == visita_id:
                                     nodo_actual = nodo
@@ -1436,7 +1436,7 @@ class EditorController(QObject):
                             continue
                     
                     if nodo_actual:
-                        # CORRECCIÓN: Actualizar las coordenadas de la visita con las del nodo actual
+                        # Actualizar las coordenadas de la visita con las del nodo actual
                         if hasattr(nodo_actual, 'get'):
                             v['X'] = nodo_actual.get('X')
                             v['Y'] = nodo_actual.get('Y')
@@ -1488,7 +1488,7 @@ class EditorController(QObject):
                 if origen and isinstance(origen, dict) and 'id' in origen:
                     origen_id = origen['id']
                     if origen_id in mapa_nodos:
-                        # CORRECCIÓN: Actualizar coordenadas en lugar de reemplazar el objeto
+                        # Actualizar coordenadas en lugar de reemplazar el objeto
                         nodo_actual = mapa_nodos[origen_id]
                         if hasattr(nodo_actual, 'get'):
                             origen['X'] = nodo_actual.get('X')
@@ -1502,7 +1502,7 @@ class EditorController(QObject):
                 if destino and isinstance(destino, dict) and 'id' in destino:
                     destino_id = destino['id']
                     if destino_id in mapa_nodos:
-                        # CORRECCIÓN: Actualizar coordenadas en lugar de reemplazar el objeto
+                        # Actualizar coordenadas en lugar de reemplazar el objeto
                         nodo_actual = mapa_nodos[destino_id]
                         if hasattr(nodo_actual, 'get'):
                             destino['X'] = nodo_actual.get('X')
