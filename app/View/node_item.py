@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import QGraphicsObject, QMessageBox, QGraphicsItem
-from PyQt5.QtCore import QRectF, Qt, pyqtSignal
+from PyQt5.QtCore import QRectF, Qt, pyqtSignal, QPointF
 from PyQt5.QtGui import QBrush, QPainter, QPen, QColor
 from Model.Nodo import Nodo
 
@@ -46,17 +46,48 @@ class NodoItem(QGraphicsObject):
         return QRectF(0, 0, self.size, self.size)
 
     def paint(self, painter: QPainter, option, widget=None):
+        painter.save()
+        
+        painter.translate(self.size / 2, self.size / 2)
+        angle = int(self.nodo.get("A", 0))  # Leemos el angulo
+        painter.rotate(360 - angle)
+        painter.translate(-self.size / 2, -self.size / 2)
+
         # Determinar el color a usar
         brush_color = self.current_color
         
+        # Dibujar círculo
         painter.setBrush(QBrush(brush_color))
         painter.setPen(QPen(Qt.black, 1))
         painter.drawEllipse(self.boundingRect())
+
+        center_y = self.size / 2
+
+        # Parámetros de las horquillas
+        fork_length = 10   # longitud de cada horquilla (hacia la izquierda)
+        fork_gap = 6       # separación entre las dos horquillas
+        offset_from_node = 1  # separación desde el borde izquierdo del nodo hasta el inicio de las horquillas
+
+        # Coordenadas: dibujamos a la izquierda del nodo
+        x_start = -offset_from_node
+        x_end = x_start - fork_length
+
+        # Posiciones verticales de las dos líneas
+        y_top = center_y - fork_gap / 2
+        y_bottom = center_y + fork_gap / 2
+
+        # Dibujar las dos horquillas
+        pen = QPen(Qt.black, 2, Qt.SolidLine, Qt.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(x_start, y_top), QPointF(x_end, y_top))
+        painter.drawLine(QPointF(x_start, y_bottom), QPointF(x_end, y_bottom))
 
         # Dibujar el ID en el centro
         painter.setPen(QPen(Qt.white, 1))
         node_id = str(self.nodo.get('id', ''))
         painter.drawText(self.boundingRect(), Qt.AlignCenter, node_id)
+
+        painter.restore()
 
     def set_selected_color(self):
         """Cambia al color de selección"""

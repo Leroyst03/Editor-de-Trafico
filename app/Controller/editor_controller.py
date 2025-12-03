@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (
     QFileDialog, QGraphicsScene, QGraphicsPixmapItem,
-    QButtonGroup, QListWidgetItem, QMessageBox,
-    QTableWidget, QTableWidgetItem, QHeaderView, QMenu
+    QButtonGroup, QListWidgetItem,
+    QTableWidgetItem, QHeaderView, QMenu
 )
 from PyQt5.QtGui import QPixmap, QPen
 from PyQt5.QtCore import Qt, QEvent, QObject
