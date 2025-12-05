@@ -1,64 +1,143 @@
+import sys
+import os
+import traceback
+from pathlib import Path
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QFile, QTextStream
+from PyQt5.QtGui import QFont
 from View.view import EditorView
 from Controller.editor_controller import EditorController
-import sys, traceback
-import os
-from pathlib import Path
 
 def excepthook(type, value, tb):
-    print("Excepción no capturada:", type.__name__, value)
+    print("="*50)
+    print("EXCEPCIÓN NO CAPTURADA:")
+    print(f"Tipo: {type.__name__}")
+    print(f"Valor: {value}")
+    print("\nTraceback:")
     traceback.print_tb(tb)
+    print("="*50)
 
 def cargar_estilos(app, ruta_estilos):
-    """Carga la hoja de estilos QSS desde un archivo"""
-
+    """Carga la hoja de estilos QSS desde un archivo - VERSIÓN MEJORADA para Windows"""
     try:
-        # Verificar si el archivo existe
-        if not Path(ruta_estilos).exists():
-            print(f"Advertencia: No se encontro {ruta_estilos}")
-            return False
-
-        # Usar QFile para leer el archivo
-        archivo = QFile(ruta_estilos)
-        if archivo.open(QFile.OpenModeFlag.ReadOnly | QFile.OpenModeFlag.Text):
-            stream = QTextStream(archivo)
-            app.setStyleSheet(stream.readAll())
-            archivo.close()
-            print(f"Estilos cargados desde: {ruta_estilos}")
-            return True
+        # Convertir a Path para manejo multiplataforma
+        ruta = Path(ruta_estilos)
         
+        # Verificar si el archivo existe
+        if not ruta.exists():
+            print(f"ADVERTENCIA: No se encontró {ruta_estilos}")
+            print(f"Buscando en rutas alternativas...")
+            
+            # Intentar rutas alternativas comunes en Windows
+            rutas_alternativas = [
+                Path.cwd() / "Static" / "Scripts" / "estilos.qss",
+                Path.cwd() / "estilos.qss",
+                Path(__file__).parent / "Static" / "Scripts" / "estilos.qss",
+                Path(sys.executable).parent / "Static" / "Scripts" / "estilos.qss"
+            ]
+            
+            for alt_ruta in rutas_alternativas:
+                if alt_ruta.exists():
+                    ruta = alt_ruta
+                    print(f"Encontrado en: {alt_ruta}")
+                    break
+        
+        if not ruta.exists():
+            print(f"ERROR: No se pudo encontrar el archivo de estilos")
+            return False
+        
+        # Usar QFile para leer el archivo
+        archivo = QFile(str(ruta))
+        if archivo.open(QFile.ReadOnly | QFile.Text):
+            stream = QTextStream(archivo)
+            # Especificar codificación UTF-8 para Windows
+            stream.setCodec("UTF-8")
+            estilo = stream.readAll()
+            archivo.close()
+            app.setStyleSheet(estilo)
+            print(f"✓ Estilos cargados desde: {ruta}")
+            return True
         else:
-            print(f"Error: No se pudo abrir {ruta_estilos}")
+            print(f"✗ No se pudo abrir {ruta}")
             return False
         
     except Exception as err:
-        print(f"Exception al cargar estilos: {err}")
+        print(f"✗ Excepción al cargar estilos: {err}")
+        traceback.print_exc()
         return False
 
+def configurar_fuente_windows():
+    """Configura fuente mejor para Windows"""
+    # En Windows, a veces las fuentes por defecto no se renderizan bien
+    font = QFont("Segoe UI", 9)
+    QApplication.setFont(font)
+
 def main():
-    # Instalar excepthook global
+    # Configurar manejo de excepciones
     sys.excepthook = excepthook
-
+    
+    # Crear aplicación
     app = QApplication(sys.argv)
-
-    # Ruta el archivo de estilos 
+    
+    # Configurar para Windows
+    configurar_fuente_windows()
+    
+    # Configurar variables de entorno para Qt en Windows
+    os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = ""
+    
+    print("="*50)
+    print("INICIANDO APLICACIÓN EN WINDOWS")
+    print(f"Directorio de trabajo: {os.getcwd()}")
+    print(f"Directorio del script: {Path(__file__).parent}")
+    print("="*50)
+    
+    # Ruta base del proyecto
     ruta_base = Path(__file__).parent
+    
+    # Ruta del archivo de estilos
     ruta_estilos = ruta_base / "Static" / "Scripts" / "estilos.qss"
-
-    # Cargar estilos antes de crear cualquier widget
+    
+    # Cargar estilos
     cargar_estilos(app, str(ruta_estilos))
-
-    view = EditorView()
-    controller = EditorController(view)
-
-    view.show()
-
+    
     try:
-        sys.exit(app.exec_())
-    except Exception:
-        # Captura cualquier excepción que escape del bucle Qt
-        excepthook(*sys.exc_info())
+        # Crear vista y controlador
+        print("Creando vista...")
+        view = EditorView()
+        print("Creando controlador...")
+        controller = EditorController(view)
+        
+        # CONECTAR EL CONTROLADOR A LA VISTA - IMPORTANTE PARA LOS EVENTOS DE TECLADO
+        view.set_controller(controller)
+        
+        # Configuración específica para Windows
+        print("Configurando para Windows...")
+        
+        # Mostrar ventana
+        print("Mostrando ventana...")
+        view.show()
+        
+        # Mensaje de éxito
+        print("="*50)
+        print("APLICACIÓN INICIADA CORRECTAMENTE")
+        print("="*50)
+        print("Atajos de teclado disponibles:")
+        print("  Enter: Finalizar creación de ruta")
+        print("  Escape: Cancelar creación de ruta")
+        print("  Suprimir: Eliminar nodo seleccionado")
+        print("  Ctrl+Z: Deshacer movimiento de nodo")
+        print("  Ctrl+Y: Rehacer movimiento de nodo")
+        print("="*50)
+        
+        # Ejecutar aplicación
+        return_code = app.exec_()
+        print(f"\nAplicación finalizada con código: {return_code}")
+        sys.exit(return_code)
+        
+    except Exception as e:
+        print(f"\n✗ ERROR CRÍTICO DURANTE LA INICIALIZACIÓN:")
+        traceback.print_exc()
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

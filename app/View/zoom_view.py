@@ -1,20 +1,43 @@
 from PyQt5.QtWidgets import QGraphicsView
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QPainter
+from PyQt5.QtCore import Qt, QPoint
+from PyQt5.QtGui import QPainter, QWheelEvent
 
 class ZoomGraphicsView(QGraphicsView):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setDragMode(QGraphicsView.ScrollHandDrag)  # mover con el ratón
-        self.setRenderHint(QPainter.Antialiasing)      
+        self.setDragMode(QGraphicsView.ScrollHandDrag)
+        self.setRenderHint(QPainter.Antialiasing)
+        self.setRenderHint(QPainter.SmoothPixmapTransform)
+        self.setRenderHint(QPainter.TextAntialiasing)
+        
+        # Configuración para mejor rendimiento en Windows
+        self.setOptimizationFlag(QGraphicsView.DontAdjustForAntialiasing, True)
+        self.setOptimizationFlag(QGraphicsView.DontSavePainterState, True)
+        self.setViewportUpdateMode(QGraphicsView.SmartViewportUpdate)
+        
+        # Mejorar la respuesta al ratón en Windows
+        self.setMouseTracking(True)
+        
+        # Variables para zoom
+        self.zoom_level = 0
+        self.zoom_factor = 1.25
+        self.min_zoom = 0.1
+        self.max_zoom = 10.0
 
-    def wheelEvent(self, event):
-        zoom_in_factor = 1.25
-        zoom_out_factor = 1 / zoom_in_factor
-
+    def wheelEvent(self, event: QWheelEvent):
+        # Zoom con la rueda del ratón
         if event.angleDelta().y() > 0:
-            zoom_factor = zoom_in_factor
+            factor = self.zoom_factor
+            self.zoom_level += 1
         else:
-            zoom_factor = zoom_out_factor
-
-        self.scale(zoom_factor, zoom_factor)
+            factor = 1 / self.zoom_factor
+            self.zoom_level -= 1
+        
+        # Limitar zoom
+        current_scale = self.transform().m11()
+        new_scale = current_scale * factor
+        
+        if self.min_zoom <= new_scale <= self.max_zoom:
+            self.scale(factor, factor)
+        
+        event.accept()

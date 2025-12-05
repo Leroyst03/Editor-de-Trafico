@@ -14,7 +14,6 @@
     <!-- Barra superior -->
     <item>
      <layout class="QHBoxLayout" name="toolbarLayout">
-      <item><widget class="QPushButton" name="seleccionar_button"><property name="text"><string>Seleccionar</string></property><property name="checkable"><bool>true</bool></property></widget></item>
       <item><widget class="QPushButton" name="mover_button"><property name="text"><string>Mover</string></property><property name="checkable"><bool>true</bool></property></widget></item>
       <item><widget class="QPushButton" name="colocar_vertice_button"><property name="text"><string>Colocar vértice</string></property><property name="checkable"><bool>true</bool></property></widget></item>
       <item><widget class="QPushButton" name="crear_ruta_button"><property name="text"><string>Crear ruta</string></property><property name="checkable"><bool>true</bool></property></widget></item>

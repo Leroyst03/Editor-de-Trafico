@@ -5,6 +5,7 @@ from Model.Nodo import Nodo
 
 class NodoItem(QGraphicsObject):
     moved = pyqtSignal(object)  # emite (id, x, y) o el objeto nodo según preferencia
+    movimiento_iniciado = pyqtSignal(object, int, int)  # Señal para inicio de movimiento: (nodo, x_inicial, y_inicial)
 
     def __init__(self, nodo: Nodo, size=20, editor=None):
         super().__init__()
@@ -33,6 +34,7 @@ class NodoItem(QGraphicsObject):
 
         # Estado interno para detectar arrastre
         self._dragging = False
+        self._posicion_inicial = None  # Para guardar posición al inicio del arrastre
 
         # Colores configurables
         self.color_normal = QColor(0, 120, 215)   # Azul por defecto
@@ -115,20 +117,27 @@ class NodoItem(QGraphicsObject):
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton and self.editor:
-            reply = QMessageBox.question(
-                None,
-                "Eliminar nodo",
-                f"¿Seguro que quieres eliminar el nodo ID {self.nodo.get('id')}?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            if reply == QMessageBox.Yes:
-                try:
-                    self.editor.eliminar_nodo(self.nodo, self)
-                finally:
-                    event.accept()
+            # Usar el mismo método que Suprimir para consistencia
+            if hasattr(self.editor, 'eliminar_nodo_seleccionado'):
+                # Seleccionar este nodo primero
+                self.setSelected(True)
+                self.editor.eliminar_nodo_seleccionado()
             else:
-                event.ignore()
+                # Método antiguo como fallback
+                reply = QMessageBox.question(
+                    None,
+                    "Eliminar nodo",
+                    f"¿Seguro que quieres eliminar el nodo ID {self.nodo.get('id')}?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                if reply == QMessageBox.Yes:
+                    try:
+                        self.editor.eliminar_nodo(self.nodo, self)
+                    finally:
+                        event.accept()
+                else:
+                    event.ignore()
         else:
             super().mouseDoubleClickEvent(event)
 
@@ -136,6 +145,16 @@ class NodoItem(QGraphicsObject):
         # Marcar inicio de arrastre si el item es movible
         if event.button() == Qt.LeftButton and (self.flags() & QGraphicsObject.ItemIsMovable):
             self._dragging = True
+            # Guardar posición inicial al iniciar el arrastre
+            scene_pos = self.scenePos()
+            x_centro = int(scene_pos.x() + self.size / 2)
+            y_centro = int(scene_pos.y() + self.size / 2)
+            self._posicion_inicial = (x_centro, y_centro)
+            
+            # Emitir señal de movimiento iniciado
+            if self.editor and hasattr(self.editor, 'registrar_movimiento_iniciado'):
+                self.editor.registrar_movimiento_iniciado(self, x_centro, y_centro)
+        
         super().mousePressEvent(event)
 
     def itemChange(self, change, value):
@@ -162,19 +181,19 @@ class NodoItem(QGraphicsObject):
 
     def mouseReleaseEvent(self, event):
         try:
-            if self._dragging:
+            if self._dragging and self._posicion_inicial:
                 p = self.scenePos()
                 cx = int(p.x() + self.size / 2)
                 cy = int(p.y() + self.size / 2)
                 
-                # Actualizar modelo
-                if hasattr(self.nodo, "set_posicion"):
-                    self.nodo.set_posicion(cx, cy)
-                else:
-                    self.nodo.update({"X": cx, "Y": cy})
+                # Verificar si realmente hubo movimiento
+                x_inicial, y_inicial = self._posicion_inicial
+                if cx != x_inicial or cy != y_inicial:
+                    # Registrar movimiento finalizado en el editor
+                    if self.editor and hasattr(self.editor, 'registrar_movimiento_finalizado'):
+                        self.editor.registrar_movimiento_finalizado(self, x_inicial, y_inicial, cx, cy)
                 
-                # Emitir señal - IMPORTANTE: solo una vez
-                self.moved.emit(self)
+                self._posicion_inicial = None
                 
         except Exception as err:
             print("Error al procesar mouseReleaseEvent:", err)

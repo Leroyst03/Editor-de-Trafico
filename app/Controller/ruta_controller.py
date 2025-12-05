@@ -2,7 +2,6 @@ from PyQt5.QtCore import Qt, QObject, QEvent
 from PyQt5.QtWidgets import QListWidgetItem, QGraphicsLineItem
 from PyQt5.QtGui import QPen
 from View.node_item import NodoItem
-from Model.Ruta import Ruta  # si tienes la clase Ruta en Model/Ruta.py
 
 class RutaController(QObject):
     def __init__(self, proyecto, view, editor):
@@ -12,46 +11,77 @@ class RutaController(QObject):
         self.editor = editor
         self.activo = False
 
-        # Estado de la ruta en construcción
+        # Estado de la ruta en construcción (como en la versión anterior)
         self._nodes_seq = []     # lista de objetos Nodo (orden)
-        self._lines = []         # QGraphicsLineItem temporales
+        self._lines = []         # QGraphicsLineItem temporales (verdes)
         self._last_item = None   # último NodoItem visual añadido
 
     def activar(self):
+        """Activa el modo de creación de rutas"""
         if not self.activo:
             self.view.marco_trabajo.viewport().installEventFilter(self)
             self.activo = True
             self._clear_state()
-            print("Modo Ruta activado")
+            print("✓ Modo Ruta activado")
+            print("Instrucciones:")
+            print("- Haz clic en nodos existentes o en el mapa para crear nuevos")
+            print("- Los nodos se conectarán con líneas verdes")
+            print("- Presiona ENTER para finalizar la ruta")
+            print("- Presiona ESC para cancelar")
+            print("- Haz clic en el botón de ruta nuevamente para terminar")
 
     def desactivar(self):
+        """Desactiva el modo de creación de rutas - VERSIÓN SIMPLIFICADA COMO LA ANTERIOR"""
         if self.activo:
-            # Finalizar la ruta en construcción (si procede)
+            # Finalizar la ruta en construcción (si procede) - EXACTAMENTE COMO LA VERSIÓN ANTERIOR
             self._finalize_route()
             self.view.marco_trabajo.viewport().removeEventFilter(self)
             self.activo = False
             self._clear_state()
-            print("Modo Ruta desactivado")
+            print("✗ Modo Ruta desactivado")
+
+    def cancelar_ruta_actual(self):
+        """Cancela la ruta actualmente en creación (con Escape)"""
+        print("⚠ Cancelando creación de ruta")
+        self._clear_state()
+
+    def finalizar_ruta_con_enter(self):
+        """Finaliza la ruta actualmente en creación con Enter"""
+        if len(self._nodes_seq) < 2:
+            print("⚠ No hay ruta en creación o tiene menos de 2 nodos")
+            return
+        
+        print(f"✓ Finalizando ruta con Enter ({len(self._nodes_seq)} nodos)")
+        self._finalize_route()
 
     def eventFilter(self, obj, event):
+        """Filtra eventos del ratón para manejar clics en nodos y mapa"""
         # Solo procesar clicks de ratón en el viewport del QGraphicsView
         if obj is self.view.marco_trabajo.viewport() and event.type() == QEvent.MouseButtonPress:
-            if event.button() == Qt.LeftButton and self.proyecto:
+            if event.button() == Qt.LeftButton and self.proyecto and self.activo:
                 scene_pos = self.view.marco_trabajo.mapToScene(event.pos())
+                print(f"✓ Clic en mapa - Posición: ({scene_pos.x()}, {scene_pos.y()})")
+                
                 # itemAt recibe coordenadas del viewport
                 item = self.view.marco_trabajo.itemAt(event.pos())
+                
                 if isinstance(item, NodoItem):
+                    print(f"✓ Clic en nodo existente ID {item.nodo.get('id')}")
                     self._add_existing_node(item)
                 else:
+                    # Crear nuevo nodo en la posición del clic
+                    print(f"✓ Creando nuevo nodo en posición ({int(scene_pos.x())}, {int(scene_pos.y())})")
                     self._create_and_add_node(int(scene_pos.x()), int(scene_pos.y()))
                 return True
         return False
 
-    # --- helpers internos ---
+    # --- Métodos de la versión anterior que funcionaban ---
     def _create_and_add_node(self, x, y):
+        """Crea un nuevo nodo y lo añade a la ruta (como en versión anterior)"""
+        # Crear el nodo en el modelo
         nodo = self.proyecto.agregar_nodo(x, y)
 
-        # Crear visual mediante helper del editor si existe
+        # Crear visual mediante helper del editor
         try:
             nodo_item = self.editor._create_nodo_item(nodo)
         except Exception:
@@ -72,21 +102,26 @@ class RutaController(QObject):
         self._append_node_to_route(nodo, nodo_item)
 
     def _add_existing_node(self, nodo_item):
+        """Añade un nodo existente a la ruta (como en versión anterior)"""
         nodo = nodo_item.nodo
         if nodo not in self.proyecto.nodos:
             self.proyecto.nodos.append(nodo)
             item = QListWidgetItem(f"ID {nodo.get('id')} - ({nodo.get('X')}, {nodo.get('Y')})")
             item.setData(Qt.UserRole, nodo)
             self.view.nodosList.addItem(item)
+        
+        # Añadir a la secuencia de la ruta
         self._append_node_to_route(nodo, nodo_item)
 
     def _append_node_to_route(self, nodo, nodo_item):
+        """Añade un nodo a la secuencia de la ruta y dibuja líneas (versión anterior)"""
         # Primer nodo: solo añadir y marcar
         if not self._nodes_seq:
             self._nodes_seq.append(nodo)
             self._last_item = nodo_item
             try:
                 nodo_item.setSelected(True)
+                nodo_item.set_selected_color()
             except Exception:
                 pass
             return
@@ -105,6 +140,7 @@ class RutaController(QObject):
         pen = QPen(Qt.darkGreen, 2)  # Color diferente para líneas temporales
         line.setPen(pen)
         line.setZValue(0.6)  # Z-value entre las líneas rojas y los nodos
+        line.setData(0, "ruta_temporal")  # Marcar como línea temporal
         self.view.marco_trabajo.scene().addItem(line)
         self._lines.append(line)
 
@@ -118,6 +154,7 @@ class RutaController(QObject):
         # Añadir nodo a la secuencia y actualizar last_item
         self._nodes_seq.append(nodo)
         self._last_item = nodo_item
+        nodo_item.set_selected_color()
 
     def _update_temp_lines(self, nodo_item=None):
         """Actualiza todas las líneas temporales cuando un nodo se mueve"""
@@ -153,17 +190,21 @@ class RutaController(QObject):
                 pen = QPen(Qt.darkGreen, 2)
                 line.setPen(pen)
                 line.setZValue(0.6)
+                line.setData(0, "ruta_temporal")  # Marcar como línea temporal
                 self.view.marco_trabajo.scene().addItem(line)
                 self._lines.append(line)
 
     def _finalize_route(self):
-        """Finaliza la ruta en construcción: guarda la ruta en el modelo y delega el dibujo al editor."""
+        """Finaliza la ruta en construcción: guarda la ruta en el modelo (versión anterior mejorada)"""
         # Si no hay suficientes nodos, limpiar temporales y salir
         if len(self._nodes_seq) < 2:
+            print("⚠ No se puede guardar: ruta necesita al menos 2 nodos")
             self._clear_temp_lines()
             self._clear_state()
             return
 
+        print(f"✓ Guardando ruta con {len(self._nodes_seq)} nodos")
+        
         # Normalizar nodos a dicts con id,X,Y
         ruta_nodes = []
         for n in self._nodes_seq:
@@ -189,6 +230,8 @@ class RutaController(QObject):
             self.proyecto.rutas = []
         self.proyecto.rutas.append(ruta_dict)
 
+        print(f"✓ Ruta guardada: Origen {origen.get('id')} -> Destino {destino.get('id')}")
+
         # Limpiar líneas temporales y estado de construcción
         self._clear_temp_lines()
         self._clear_state()
@@ -199,12 +242,11 @@ class RutaController(QObject):
                 self.editor._dibujar_rutas()
             if hasattr(self.editor, "_mostrar_rutas_lateral"):
                 self.editor._mostrar_rutas_lateral()
-        except Exception:
-            pass
-
-        print(f"Ruta creada: {len(self._nodes_seq)} nodos")
+        except Exception as e:
+            print(f"Error actualizando UI: {e}")
 
     def _clear_temp_lines(self):
+        """Elimina todas las líneas temporales"""
         # Desconectar todas las señales de los nodos
         try:
             for nodo in self._nodes_seq:
@@ -227,11 +269,23 @@ class RutaController(QObject):
         self._lines = []
 
     def _clear_state(self):
+        """Limpia todo el estado de la ruta en construcción"""
         try:
             if self._last_item:
                 self._last_item.setSelected(False)
+                self._last_item.set_normal_color()
         except Exception:
             pass
+        
+        # Restaurar colores de todos los nodos en la secuencia
+        for nodo in self._nodes_seq:
+            for item in self.view.marco_trabajo.scene().items():
+                if isinstance(item, NodoItem) and getattr(item, "nodo", None) == nodo:
+                    try:
+                        item.set_normal_color()
+                    except Exception:
+                        pass
+        
         self._nodes_seq = []
         self._last_item = None
         self._clear_temp_lines()

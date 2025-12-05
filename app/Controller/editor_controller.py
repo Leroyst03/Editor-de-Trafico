@@ -1,12 +1,11 @@
 from PyQt5.QtWidgets import (
     QFileDialog, QGraphicsScene, QGraphicsPixmapItem,
     QButtonGroup, QListWidgetItem,
-    QTableWidgetItem, QHeaderView, QMenu
+    QTableWidgetItem, QHeaderView, QMenu, QMessageBox
 )
-from PyQt5.QtGui import QPixmap, QPen
+from PyQt5.QtGui import QPixmap, QPen, QColor
 from PyQt5.QtCore import Qt, QEvent, QObject
 from Model.Proyecto import Proyecto
-from Controller.seleccionar_controller import SeleccionarController
 from Controller.mover_controller import MoverController
 from Controller.colocar_controller import ColocarController
 from Controller.ruta_controller import RutaController
@@ -41,8 +40,7 @@ class EditorController(QObject):
         abrir_action.triggered.connect(self.abrir_proyecto)
         guardar_action.triggered.connect(self.guardar_proyecto)
 
-        # --- Subcontroladores ---
-        self.seleccionar_ctrl = SeleccionarController(self.proyecto, self.view, self)
+        # --- Subcontroladores---
         self.mover_ctrl = MoverController(self.proyecto, self.view, self)
         self.colocar_ctrl = ColocarController(self.proyecto, self.view, self)
         self.ruta_ctrl = RutaController(self.proyecto, self.view, self)
@@ -51,7 +49,6 @@ class EditorController(QObject):
         self.modo_group = QButtonGroup()
         self.modo_group.setExclusive(False)
 
-        self.modo_group.addButton(self.view.seleccionar_button)
         self.modo_group.addButton(self.view.mover_button)
         self.modo_group.addButton(self.view.colocar_vertice_button)
         self.modo_group.addButton(self.view.crear_ruta_button)
@@ -59,17 +56,17 @@ class EditorController(QObject):
         self.modo_group.buttonClicked.connect(self.cambiar_modo)
         self.modo_actual = None
 
-        # Estado inicial: zoom libre
+        # Estado inicial: modo por defecto (navegación)
         self.view.marco_trabajo.setDragMode(self.view.marco_trabajo.ScrollHandDrag)
 
         self._changing_selection = False
         self._updating_ui = False
 
-        # mantener referencias a las líneas de rutas dibujadas: lista de listas de QGraphicsLineItem
-        self._route_lines = []            # líneas rojas por ruta
-        self._highlight_lines = []        # líneas amarillas de selección
+        # mantener referencias a las líneas de rutas dibujadas
+        self._route_lines = []            
+        self._highlight_lines = []        
 
-        # instalar filtro de eventos en el viewport para detectar clicks fuera de paneles
+        # instalar filtro de eventos en el viewport
         try:
             self.view.marco_trabajo.viewport().installEventFilter(self)
         except Exception:
@@ -84,49 +81,109 @@ class EditorController(QObject):
 
         # Índice de la ruta actualmente seleccionada
         self.ruta_actual_idx = None
+        
+        # --- SISTEMA DE DESHACER/REHACER (UNDO/REDO) ---
+        self.historial_movimientos = []  # Lista de movimientos
+        self.indice_historial = -1  # Puntero a la posición actual en el historial (-1 = vacío)
+        self.max_historial = 100  # Límite de cambios en el historial
+        
+        # Movimiento actual en progreso (para guardar en historial)
+        self.movimiento_actual = None  # {'nodo': nodo_item, 'x_inicial': x, 'y_inicial': y}
+        
+        # Si hay proyecto inicial, configurarlo
+        if self.proyecto:
+            self._actualizar_referencias_proyecto(self.proyecto)
+
+    # --- MÉTODOS NUEVOS PARA MANEJO DE PROYECTO ---
+    
+    def _actualizar_referencias_proyecto(self, proyecto):
+        """Actualiza todas las referencias al proyecto en controladores y subcontroladores"""
+        self.proyecto = proyecto
+        
+        # Actualizar en subcontroladores
+        self.mover_ctrl.proyecto = proyecto
+        self.colocar_ctrl.proyecto = proyecto
+        self.ruta_ctrl.proyecto = proyecto
+        
+        # IMPORTANTE: Resetear el estado de los subcontroladores
+        if self.modo_actual:
+            self._resetear_modo_actual()
+        
+        print("✓ Referencias del proyecto actualizadas en todos los controladores")
+
+    def _resetear_modo_actual(self):
+        """Resetea el modo actual para forzar reconfiguración"""
+        modo_temp = self.modo_actual
+        self.modo_actual = None
+        
+        # Desactivar todos los botones primero
+        for b in (self.view.mover_button,
+                  self.view.colocar_vertice_button, self.view.crear_ruta_button):
+            b.setChecked(False)
+        
+        # Re-activar el modo si es necesario
+        if modo_temp:
+            boton = None
+            if modo_temp == "mover":
+                boton = self.view.mover_button
+            elif modo_temp == "colocar":
+                boton = self.view.colocar_vertice_button
+            elif modo_temp == "ruta":
+                boton = self.view.crear_ruta_button
+            
+            if boton:
+                boton.setChecked(True)
+                self.cambiar_modo(boton)
+
+    def _limpiar_ui_completa(self):
+        """Limpia toda la UI para nuevo proyecto"""
+        # Limpiar escena
+        self.scene.clear()
+        
+        # Limpiar listas
+        self.view.nodosList.clear()
+        if hasattr(self.view, "rutasList"):
+            self.view.rutasList.clear()
+        
+        # Limpiar tabla de propiedades
+        self.view.propertiesTable.clear()
+        self.view.propertiesTable.setRowCount(0)
+        self.view.propertiesTable.setColumnCount(2)
+        self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
+        
+        # Limpiar líneas de ruta
+        self._clear_route_lines()
+        self._clear_highlight_lines()
+        
+        # Resetear índices
+        self.ruta_actual_idx = None
+        self._changing_selection = False
+        self._updating_ui = False
+        
+        # Limpiar historial cuando se crea/abre un nuevo proyecto
+        self._limpiar_historial()
+        
+        print("✓ UI completamente limpiada para nuevo proyecto")
 
     # --- Gestión de modos ---
     def cambiar_modo(self, boton):
+        # Si el botón ya estaba activado y se hace clic, se desactiva
         if not boton.isChecked():
+            # Desactivar todos los modos
             self.modo_actual = None
-            self.seleccionar_ctrl.desactivar()
             self.mover_ctrl.desactivar()
             self.colocar_ctrl.desactivar()
-            # Asegurarse de desactivar el controlador de rutas al salir del modo
+            
+            # IMPORTANTE: CORRECCIÓN CRÍTICA - SIEMPRE DESACTIVAR EL CONTROLADOR DE RUTA
             try:
-                self.ruta_ctrl.desactivar()
-            except Exception:
-                pass
+                self.ruta_ctrl.desactivar()  # ← ESTA ES LA LÍNEA CLAVE QUE FALTABA
+            except Exception as e:
+                print(f"Error al desactivar ruta: {e}")
+            
+            # VOLVER AL MODO POR DEFECTO: navegación del mapa
             self.view.marco_trabajo.setDragMode(self.view.marco_trabajo.ScrollHandDrag)
+            
             # desactivar movimiento en nodos
-            for item in self.scene.items():
-                if isinstance(item, NodoItem):
-                    try:
-                        item.setFlag(item.ItemIsMovable, False)
-                    except Exception:
-                        pass
-            return
-
-        for b in (self.view.seleccionar_button, self.view.mover_button,
-                self.view.colocar_vertice_button, self.view.crear_ruta_button):
-            if b is not boton:
-                b.setChecked(False)
-
-        if boton == self.view.seleccionar_button:
-            # --- MODO SELECCIONAR ---
-            self.modo_actual = "seleccionar"
-            self.seleccionar_ctrl.activar()
-            self.mover_ctrl.desactivar()
-            self.colocar_ctrl.desactivar()
-            try:
-                self.ruta_ctrl.desactivar()
-            except Exception:
-                pass
-
-            # No se puede arrastrar ni mover nada
-            self.view.marco_trabajo.setDragMode(self.view.marco_trabajo.NoDrag)
-
-            # Desactivar movimiento en todos los nodos pero mantenerlos focusable
             for item in self.scene.items():
                 if isinstance(item, NodoItem):
                     try:
@@ -134,20 +191,33 @@ class EditorController(QObject):
                         item.setFlag(item.ItemIsFocusable, True)
                     except Exception:
                         pass
+            
+            # Restaurar colores normales de nodos
+            self.restaurar_colores_nodos()
+            
+            print("Modo por defecto activado: navegación del mapa y selección")
+            return
 
-            print("Modo Seleccionar activado: solo ver propiedades de nodos")
+        # Desactivar los otros botones
+        for b in (self.view.mover_button, self.view.colocar_vertice_button, 
+                  self.view.crear_ruta_button):
+            if b is not boton:
+                b.setChecked(False)
 
-        elif boton == self.view.mover_button:
+        if boton == self.view.mover_button:
             # --- MODO MOVER ---
             self.modo_actual = "mover"
             self.mover_ctrl.activar()
-            self.seleccionar_ctrl.desactivar()
             self.colocar_ctrl.desactivar()
+            
+            # IMPORTANTE: Desactivar modo ruta
             try:
                 self.ruta_ctrl.desactivar()
             except Exception:
                 pass
-            self.view.marco_trabajo.setDragMode(self.view.marco_trabajo.ScrollHandDrag)
+            
+            # IMPORTANTE: Desactivar arrastre del mapa (NoDrag)
+            self.view.marco_trabajo.setDragMode(self.view.marco_trabajo.NoDrag)
 
             # Activar movimiento en todos los nodos
             for item in self.scene.items():
@@ -158,52 +228,346 @@ class EditorController(QObject):
                     except Exception:
                         pass
 
-            print("Modo Mover activado: nodos arrastrables")
+            print("Modo Mover activado: nodos arrastrables, mapa fijo")
 
         elif boton == self.view.colocar_vertice_button:
             # --- MODO COLOCAR ---
             self.modo_actual = "colocar"
             self.colocar_ctrl.activar()
-            self.seleccionar_ctrl.desactivar()
             self.mover_ctrl.desactivar()
+            
+            # IMPORTANTE: Desactivar modo ruta
             try:
                 self.ruta_ctrl.desactivar()
             except Exception:
                 pass
+            
             self.view.marco_trabajo.setDragMode(self.view.marco_trabajo.NoDrag)
-
+            
             print("Modo Colocar activado: añadir nuevos nodos")
 
         elif boton == self.view.crear_ruta_button:
             # --- MODO RUTA ---
             self.modo_actual = "ruta"
+            
+            # IMPORTANTE: Verificar que tenemos un proyecto
+            if not self.proyecto:
+                print("✗ ERROR: No hay proyecto cargado. Crea o abre un proyecto primero.")
+                boton.setChecked(False)
+                QMessageBox.warning(self.view, "Error", 
+                                   "No hay proyecto cargado. Crea o abre un proyecto primero.")
+                return
+                
+            # CORRECCIÓN CRÍTICA: NO verificar que haya nodos, porque el usuario puede crear el primer nodo
+            # al hacer clic en el mapa. Esta verificación estaba mal.
+            print("Activando modo ruta - El usuario puede crear nodos haciendo clic en el mapa")
+            
+            # Activar modo ruta
             self.ruta_ctrl.activar()
-            self.seleccionar_ctrl.desactivar()
             self.mover_ctrl.desactivar()
             self.colocar_ctrl.desactivar()
             self.view.marco_trabajo.setDragMode(self.view.marco_trabajo.NoDrag)
-
+            
             print("Modo Ruta activado: crear rutas entre nodos")
+            print("Instrucciones:")
+            print("- Haz clic en nodos existentes o en el mapa para crear nuevos")
+            print("- Los nodos se conectarán con líneas verdes")
+            print("- Presiona ENTER para finalizar la ruta")
+            print("- Presiona ESC para cancelar")
+            print("- Haz clic en el botón de ruta nuevamente para terminar")
 
         # Actualizar líneas después de cambiar modo
         self.actualizar_lineas_rutas()
 
-    def actualizar_lineas_rutas(self):
-        """Fuerza la actualización de todas las líneas de ruta"""
-        self._dibujar_rutas()
-        if hasattr(self.view, "rutasList") and self.view.rutasList.selectedItems():
-            self.seleccionar_ruta_desde_lista()
+    # --- MÉTODOS PARA MANEJO DE EVENTOS DE TECLADO ---
+    
+    def finalizar_ruta_actual(self):
+        """Finaliza la creación de la ruta actual cuando se presiona Enter"""
+        if self.modo_actual == "ruta":
+            try:
+                # Finalizar la ruta primero
+                self.ruta_ctrl.finalizar_ruta_con_enter()
+                print("✓ Ruta finalizada con Enter")
+                
+                # Desactivar el botón de ruta después de finalizar
+                self.view.crear_ruta_button.setChecked(False)
+                # Y llamar a cambiar_modo para limpiar todo
+                self.cambiar_modo(self.view.crear_ruta_button)
+                
+            except Exception as e:
+                print(f"Error al finalizar ruta con Enter: {e}")
+        else:
+            print("⚠ No estás en modo Ruta")
+    
+    def cancelar_ruta_actual(self):
+        """Cancela la creación de la ruta actual cuando se presiona Escape"""
+        if self.modo_actual == "ruta":
+            try:
+                # Cancelar la ruta primero
+                self.ruta_ctrl.cancelar_ruta_actual()
+                print("✓ Ruta cancelada con Escape")
+                
+                # Desactivar el botón de ruta
+                self.view.crear_ruta_button.setChecked(False)
+                # Y llamar a cambiar_modo para limpiar todo
+                self.cambiar_modo(self.view.crear_ruta_button)
+                
+            except Exception as e:
+                print(f"Error al cancelar ruta: {e}")
+        else:
+            print("⚠ No estás en modo Ruta")
+    
+    def eliminar_nodo_seleccionado(self):
+        """Elimina el nodo seleccionado cuando se presiona Suprimir"""
+        try:
+            # Verificar si hay nodos seleccionados en la escena
+            seleccionados_escena = self.scene.selectedItems()
+            
+            # Verificar si hay nodos seleccionados en la lista lateral
+            seleccionados_lista = self.view.nodosList.selectedItems()
+            
+            nodo_a_eliminar = None
+            nodo_item_a_eliminar = None
+            
+            # Prioridad: selección en la escena sobre selección en la lista
+            if seleccionados_escena:
+                for item in seleccionados_escena:
+                    if isinstance(item, NodoItem):
+                        nodo_a_eliminar = item.nodo
+                        nodo_item_a_eliminar = item
+                        break
+            
+            # Si no hay selección en la escena, buscar en la lista lateral
+            elif seleccionados_lista:
+                nodo_a_eliminar = seleccionados_lista[0].data(Qt.UserRole)
+                # Buscar el NodoItem correspondiente en la escena
+                for item in self.scene.items():
+                    if isinstance(item, NodoItem) and item.nodo == nodo_a_eliminar:
+                        nodo_item_a_eliminar = item
+                        break
+            
+            # Si encontramos un nodo para eliminar
+            if nodo_a_eliminar and nodo_item_a_eliminar:
+                nodo_id = nodo_a_eliminar.get('id')
+                
+                # Eliminar directamente (sin confirmación)
+                print(f"✓ Eliminando nodo ID {nodo_id}")
+                self.eliminar_nodo(nodo_a_eliminar, nodo_item_a_eliminar)
+            else:
+                print("⚠ No hay nodo seleccionado para eliminar")
+                
+        except Exception as e:
+            print(f"Error al eliminar nodo con Suprimir: {e}")
 
-    # --- Funciones de proyecto ---
+    # --- SISTEMA DE DESHACER/REHACER (UNDO/REDO) ---
+    
+    def _limpiar_historial(self):
+        """Limpia el historial de movimientos"""
+        self.historial_movimientos = []
+        self.indice_historial = -1
+        self.movimiento_actual = None
+        print("Historial de movimientos limpiado")
+    
+    def registrar_movimiento_iniciado(self, nodo_item, x_inicial, y_inicial):
+        """Registra el inicio de un movimiento (cuando se empieza a arrastrar un nodo)"""
+        try:
+            nodo_id = nodo_item.nodo.get('id')
+            if nodo_id is None:
+                return
+                
+            self.movimiento_actual = {
+                'nodo_item': nodo_item,
+                'nodo_id': nodo_id,
+                'x_inicial': x_inicial,
+                'y_inicial': y_inicial
+            }
+        except Exception as e:
+            print(f"Error registrando movimiento iniciado: {e}")
+    
+    def registrar_movimiento_finalizado(self, nodo_item, x_inicial, y_inicial, x_final, y_final):
+        """Registra el final de un movimiento y lo agrega al historial"""
+        try:
+            # Verificar que tenemos un movimiento en progreso
+            if not self.movimiento_actual:
+                return
+                
+            # Verificar que es el mismo nodo
+            nodo_id = nodo_item.nodo.get('id')
+            if nodo_id != self.movimiento_actual['nodo_id']:
+                return
+            
+            # Verificar que realmente hubo movimiento
+            if x_inicial == x_final and y_inicial == y_final:
+                self.movimiento_actual = None
+                return
+            
+            # Si estamos en medio del historial (por deshacer previo), eliminar movimientos futuros
+            if self.indice_historial < len(self.historial_movimientos) - 1:
+                self.historial_movimientos = self.historial_movimientos[:self.indice_historial + 1]
+            
+            # Crear entrada del historial
+            movimiento = {
+                'nodo_id': nodo_id,
+                'x_anterior': x_inicial,
+                'y_anterior': y_inicial,
+                'x_nueva': x_final,
+                'y_nueva': y_final
+            }
+            
+            # Agregar al historial
+            self.historial_movimientos.append(movimiento)
+            
+            # Limitar tamaño del historial a max_historial
+            if len(self.historial_movimientos) > self.max_historial:
+                # Eliminar el movimiento más antiguo
+                self.historial_movimientos.pop(0)
+            else:
+                # Incrementar índice solo si no estamos eliminando elementos
+                self.indice_historial += 1
+            
+            # Mover puntero a la última posición
+            self.indice_historial = len(self.historial_movimientos) - 1
+            
+            print(f"Movimiento registrado: Nodo {nodo_id} de ({x_inicial},{y_inicial}) a ({x_final},{y_final})")
+            
+        except Exception as e:
+            print(f"Error registrando movimiento finalizado: {e}")
+        finally:
+            self.movimiento_actual = None
+    
+    def deshacer_movimiento(self):
+        """Deshace el último movimiento (Ctrl+Z)"""
+        if self.indice_historial < 0:
+            print("No hay movimientos para deshacer")
+            return
+            
+        try:
+            # Obtener el movimiento actual
+            movimiento = self.historial_movimientos[self.indice_historial]
+            nodo_id = movimiento['nodo_id']
+            x_anterior = movimiento['x_anterior']
+            y_anterior = movimiento['y_anterior']
+            
+            print(f"Deshaciendo movimiento: Nodo {nodo_id} a ({x_anterior},{y_anterior})")
+            
+            # Buscar el nodo en la escena
+            nodo_encontrado = False
+            for item in self.scene.items():
+                if isinstance(item, NodoItem):
+                    if item.nodo.get('id') == nodo_id:
+                        # Mover el nodo a la posición anterior
+                        item.setPos(x_anterior - item.size / 2, y_anterior - item.size / 2)
+                        
+                        # Actualizar el modelo
+                        if isinstance(item.nodo, dict):
+                            item.nodo["X"] = x_anterior
+                            item.nodo["Y"] = y_anterior
+                        else:
+                            setattr(item.nodo, "X", x_anterior)
+                            setattr(item.nodo, "Y", y_anterior)
+                        
+                        # Actualizar UI
+                        self.actualizar_lista_nodo(item.nodo)
+                        self.actualizar_propiedades_valores(item.nodo, claves=("X", "Y"))
+                        
+                        # Actualizar rutas
+                        self._dibujar_rutas()
+                        
+                        nodo_encontrado = True
+                        break
+            
+            if nodo_encontrado:
+                # Decrementar índice del historial
+                self.indice_historial -= 1
+                print(f"Movimiento deshecho. Índice actual: {self.indice_historial}")
+            else:
+                print(f"Error: No se encontró el nodo {nodo_id}")
+                
+        except Exception as e:
+            print(f"Error deshaciendo movimiento: {e}")
+    
+    def rehacer_movimiento(self):
+        """Rehace el movimiento deshecho (Ctrl+Y)"""
+        if self.indice_historial >= len(self.historial_movimientos) - 1:
+            print("No hay movimientos para rehacer")
+            return
+            
+        try:
+            # Incrementar índice primero
+            self.indice_historial += 1
+            
+            # Obtener el movimiento a rehacer
+            movimiento = self.historial_movimientos[self.indice_historial]
+            nodo_id = movimiento['nodo_id']
+            x_nueva = movimiento['x_nueva']
+            y_nueva = movimiento['y_nueva']
+            
+            print(f"Rehaciendo movimiento: Nodo {nodo_id} a ({x_nueva},{y_nueva})")
+            
+            # Buscar el nodo en la escena
+            nodo_encontrado = False
+            for item in self.scene.items():
+                if isinstance(item, NodoItem):
+                    if item.nodo.get('id') == nodo_id:
+                        # Mover el nodo a la nueva posición
+                        item.setPos(x_nueva - item.size / 2, y_nueva - item.size / 2)
+                        
+                        # Actualizar el modelo
+                        if isinstance(item.nodo, dict):
+                            item.nodo["X"] = x_nueva
+                            item.nodo["Y"] = y_nueva
+                        else:
+                            setattr(item.nodo, "X", x_nueva)
+                            setattr(item.nodo, "Y", y_nueva)
+                        
+                        # Actualizar UI
+                        self.actualizar_lista_nodo(item.nodo)
+                        self.actualizar_propiedades_valores(item.nodo, claves=("X", "Y"))
+                        
+                        # Actualizar rutas
+                        self._dibujar_rutas()
+                        
+                        nodo_encontrado = True
+                        break
+            
+            if not nodo_encontrado:
+                print(f"Error: No se encontró el nodo {nodo_id}")
+                # Si no encontramos el nodo, revertir el incremento del índice
+                self.indice_historial -= 1
+            else:
+                print(f"Movimiento rehecho. Índice actual: {self.indice_historial}")
+                
+        except Exception as e:
+            print(f"Error rehaciendo movimiento: {e}")
+            # En caso de error, revertir el incremento del índice
+            if self.indice_historial > 0:
+                self.indice_historial -= 1
+
+    # --- FUNCIONES DE PROYECTO ---
+    
     def nuevo_proyecto(self):
         ruta_mapa, _ = QFileDialog.getOpenFileName(
             self.view, "Seleccionar mapa", "", "Imagenes (*.png *.jpg *.jpeg)"
         )
         if not ruta_mapa:
             return
+        
+        # Crear nuevo proyecto
         self.proyecto = Proyecto(ruta_mapa)
+        
+        # Actualizar referencias en TODOS los subcontroladores
+        self._actualizar_referencias_proyecto(self.proyecto)
+        
+        # Limpiar UI (esto también limpia el historial)
+        self._limpiar_ui_completa()
+        
+        # Mostrar mapa
         self._mostrar_mapa(ruta_mapa)
-        print("Nuevo proyecto creado con mapa:", ruta_mapa)
+        
+        # Resetear botones y modo
+        self._resetear_modo_actual()
+        
+        print("✓ Nuevo proyecto creado con mapa:", ruta_mapa)
         self.diagnosticar_estado_proyecto()
 
     def abrir_proyecto(self):
@@ -213,18 +577,19 @@ class EditorController(QObject):
         if not ruta_archivo:
             return
         try:
+            # Cargar proyecto
             self.proyecto = Proyecto.cargar(ruta_archivo)
-
-            # Actualizar referencias en subcontroladores
-            self.seleccionar_ctrl.proyecto = self.proyecto
-            self.mover_ctrl.proyecto = self.proyecto
-            self.colocar_ctrl.proyecto = self.proyecto
-            self.ruta_ctrl.proyecto = self.proyecto
-
+            
+            # Usar el mismo método para actualizar referencias
+            self._actualizar_referencias_proyecto(self.proyecto)
+            
+            # Limpiar UI primero (esto también limpia el historial)
+            self._limpiar_ui_completa()
+            
             if self.proyecto.mapa:
                 self._mostrar_mapa(self.proyecto.mapa)
 
-            # Crear NodoItem correctamente con editor=self
+            # Crear NodoItem correctamente
             for nodo in self.proyecto.nodos:
                 try:
                     nodo_item = self._create_nodo_item(nodo)
@@ -249,10 +614,10 @@ class EditorController(QObject):
             self._dibujar_rutas()
             self._mostrar_rutas_lateral()
 
-            print("Proyecto cargado desde:", ruta_archivo)
+            print("✓ Proyecto cargado desde:", ruta_archivo)
             self.diagnosticar_estado_proyecto()
         except Exception as err:
-            print("Error al abrir proyecto:", err)
+            print("✗ Error al abrir proyecto:", err)
 
     def guardar_proyecto(self):
         if not self.proyecto:
@@ -267,9 +632,9 @@ class EditorController(QObject):
             ruta_archivo += ".json"
         try:
             self.proyecto.guardar(ruta_archivo)
-            print("Proyecto guardado en:", ruta_archivo)
+            print("✓ Proyecto guardado en:", ruta_archivo)
         except Exception as err:
-            print("Error al guardar proyecto:", err)
+            print("✗ Error al guardar proyecto:", err)
 
     def _mostrar_mapa(self, ruta_mapa):
         # Limpia la escena y coloca el mapa al fondo sin interceptar clics
@@ -459,13 +824,7 @@ class EditorController(QObject):
                 except:
                     pass
         
-        # DEBUG: Mostrar qué nodos se van a resaltar
-        print(f"DEBUG: Resaltando {len(nodos_ruta)} nodos de la ruta")
-        for i, nodo in enumerate(nodos_ruta):
-            print(f"  Nodo {i}: {nodo}")
-        
         # Resaltar cada nodo en la escena
-        nodos_resaltados = 0
         for nodo_ruta in nodos_ruta:
             # Obtener el ID del nodo de la ruta
             if isinstance(nodo_ruta, dict):
@@ -495,10 +854,7 @@ class EditorController(QObject):
                     # Si los IDs coinciden, resaltar el nodo
                     if item_id is not None and str(item_id) == str(nodo_ruta_id):
                         item.set_route_selected_color()
-                        nodos_resaltados += 1
                         break
-        
-        print(f"DEBUG: Se resaltaron {nodos_resaltados} nodos de la ruta")
 
     def restaurar_colores_nodos(self):
         """Restaura todos los nodos a su color normal"""
@@ -506,7 +862,7 @@ class EditorController(QObject):
             if isinstance(item, NodoItem):
                 item.set_normal_color()
 
-    # --- Sincronización lista ↔ mapa (MODIFICADOS) ---
+    # --- Sincronización lista ↔ mapa---
     def seleccionar_nodo_desde_lista(self):
         if self._changing_selection:
             return
@@ -1387,7 +1743,7 @@ class EditorController(QObject):
                 if isinstance(destino, dict) and 'id' in destino:
                     destino_id = destino['id']
                     
-                    # Buscar el nodo ACTUAL en el proyecto - VERSIÓN CORREGIDA
+                    # Buscar el nodo ACTUAL en el proyecto
                     nodo_actual = None
                     for nodo in getattr(self.proyecto, "nodos", []):
                         try:
@@ -1464,7 +1820,7 @@ class EditorController(QObject):
         if not hasattr(self.proyecto, "nodos") or not hasattr(self.proyecto, "rutas"):
             return
 
-        # Crear mapa de nodos por ID para búsqueda rápida - VERSIÓN CORREGIDA
+        # Crear mapa de nodos por ID para búsqueda rápida 
         mapa_nodos = {}
         for nodo in self.proyecto.nodos:
             try:
@@ -1483,7 +1839,7 @@ class EditorController(QObject):
             try:
                 ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
                 
-                # Reparar ORIGEN - VERSIÓN CORREGIDA
+                # Reparar ORIGEN 
                 origen = ruta_dict.get("origen")
                 if origen and isinstance(origen, dict) and 'id' in origen:
                     origen_id = origen['id']
@@ -1497,7 +1853,7 @@ class EditorController(QObject):
                             origen['X'] = nodo_actual.get('X', origen.get('X', 0))
                             origen['Y'] = nodo_actual.get('Y', origen.get('Y', 0))
                 
-                # Reparar DESTINO - VERSIÓN CORREGIDA  
+                # Reparar DESTINO 
                 destino = ruta_dict.get("destino")
                 if destino and isinstance(destino, dict) and 'id' in destino:
                     destino_id = destino['id']
@@ -1511,14 +1867,14 @@ class EditorController(QObject):
                             destino['X'] = nodo_actual.get('X', destino.get('X', 0))
                             destino['Y'] = nodo_actual.get('Y', destino.get('Y', 0))
                 
-                # Reparar VISITA - VERSIÓN CORREGIDA
+                # Reparar VISITA
                 visita = ruta_dict.get("visita", [])
                 nueva_visita = []
                 for v in visita:
                     if isinstance(v, dict) and 'id' in v:
                         visita_id = v['id']
                         if visita_id in mapa_nodos:
-                            # CORRECCIÓN: Actualizar coordenadas en lugar de reemplazar el objeto
+                            # Actualizar coordenadas en lugar de reemplazar el objeto
                             nodo_actual = mapa_nodos[visita_id]
                             if hasattr(nodo_actual, 'get'):
                                 v['X'] = nodo_actual.get('X')
@@ -1619,6 +1975,12 @@ class EditorController(QObject):
             pass
         self._highlight_lines = []
 
+    def actualizar_lineas_rutas(self):
+        """Fuerza la actualización de todas las líneas de ruta"""
+        self._dibujar_rutas()
+        if hasattr(self.view, "rutasList") and self.view.rutasList.selectedItems():
+            self.seleccionar_ruta_desde_lista()
+
     def _actualizar_propiedad_nodo(self, item):
         """
         Maneja cambios en propertiesTable para un nodo.
@@ -1703,15 +2065,21 @@ class EditorController(QObject):
         except Exception:
             pass
 
-    # --- Event filter para deselección al clicar en fondo (MODIFICADO) ---
+    # --- Event filter para deselección al clicar en fondo ---
     def eventFilter(self, obj, event):
-        # Detectar click izquierdo en el viewport y deseleccionar si se hace en el fondo
+        # Detectar click izquierdo en el viewport
         try:
             if event.type() == QEvent.MouseButtonPress:
-                # mapear a escena
+                # Mapear a escena
                 pos = self.view.marco_trabajo.mapToScene(event.pos())
+                
+                # PRIMERO: Si estamos en modo ruta, NO manejar el clic aquí
+                # El RutaController manejará los clics a través de su eventFilter
+                if self.modo_actual == "ruta":
+                    return False  # Dejar que RutaController maneje el clic
+                
+                # SEGUNDO: Comportamiento normal (solo si NO estamos en modo ruta)
                 items = self.scene.items(pos)
-                # si no hay NodoItem bajo el cursor, limpiar selección
                 if not any(isinstance(it, NodoItem) for it in items):
                     # deseleccionar items de la escena
                     try:
@@ -1760,7 +2128,7 @@ class EditorController(QObject):
         print(f"Nodos en proyecto: {len(getattr(self.proyecto, 'nodos', []))}")
         for i, nodo in enumerate(getattr(self.proyecto, "nodos", [])):
             try:
-                # CORRECCIÓN: Usar nodo.get() para objetos Nodo
+                # Usar nodo.get() para objetos Nodo
                 if hasattr(nodo, 'get'):
                     nodo_id = nodo.get('id', "N/A")
                     x = nodo.get('X', "N/A")
@@ -1780,7 +2148,7 @@ class EditorController(QObject):
                 origen = ruta_dict.get("origen", {})
                 destino = ruta_dict.get("destino", {})
                 
-                # CORRECCIÓN: Usar .get() para diccionarios
+                # Usar .get() para diccionarios
                 origen_id = origen.get("id", "N/A") if isinstance(origen, dict) else "N/A"
                 destino_id = destino.get("id", "N/A") if isinstance(destino, dict) else "N/A"
                 print(f"  Ruta {i}: Origen {origen_id} -> Destino {destino_id}")
