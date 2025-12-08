@@ -117,27 +117,11 @@ class NodoItem(QGraphicsObject):
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton and self.editor:
-            # Usar el mismo método que Suprimir para consistencia
-            if hasattr(self.editor, 'eliminar_nodo_seleccionado'):
-                # Seleccionar este nodo primero
-                self.setSelected(True)
-                self.editor.eliminar_nodo_seleccionado()
-            else:
-                # Método antiguo como fallback
-                reply = QMessageBox.question(
-                    None,
-                    "Eliminar nodo",
-                    f"¿Seguro que quieres eliminar el nodo ID {self.nodo.get('id')}?",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No
-                )
-                if reply == QMessageBox.Yes:
-                    try:
-                        self.editor.eliminar_nodo(self.nodo, self)
-                    finally:
-                        event.accept()
-                else:
-                    event.ignore()
+            # Seleccionar este nodo primero
+            self.setSelected(True)
+            # Llamar al método del editor que ahora incluye confirmación
+            self.editor.eliminar_nodo_seleccionado()
+            event.accept()
         else:
             super().mouseDoubleClickEvent(event)
 

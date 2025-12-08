@@ -72,6 +72,9 @@ class EditorController(QObject):
         except Exception:
             pass
 
+        # Instalar filtro de eventos en la ventana principal para manejo de teclado
+        self.view.installEventFilter(self)
+
         if hasattr(self.view, "rutasList"):
             try:
                 self.view.rutasList.itemSelectionChanged.disconnect(self.seleccionar_ruta_desde_lista)
@@ -318,7 +321,7 @@ class EditorController(QObject):
             print("⚠ No estás en modo Ruta")
     
     def eliminar_nodo_seleccionado(self):
-        """Elimina el nodo seleccionado cuando se presiona Suprimir"""
+        """Elimina el nodo seleccionado cuando se presiona Suprimir, mostrando confirmación"""
         try:
             # Verificar si hay nodos seleccionados en la escena
             seleccionados_escena = self.scene.selectedItems()
@@ -350,14 +353,57 @@ class EditorController(QObject):
             if nodo_a_eliminar and nodo_item_a_eliminar:
                 nodo_id = nodo_a_eliminar.get('id')
                 
-                # Eliminar directamente (sin confirmación)
-                print(f"✓ Eliminando nodo ID {nodo_id}")
-                self.eliminar_nodo(nodo_a_eliminar, nodo_item_a_eliminar)
+                # Mostrar cuadro de confirmación
+                reply = QMessageBox.question(
+                    self.view,
+                    "Confirmar eliminación",
+                    f"¿Estás seguro de que quieres eliminar el nodo ID {nodo_id}?\n\n"
+                    f"Esta acción eliminará el nodo y reconfigurará las rutas que lo contengan.",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                
+                if reply == QMessageBox.Yes:
+                    print(f"✓ Eliminando nodo ID {nodo_id}")
+                    self.eliminar_nodo(nodo_a_eliminar, nodo_item_a_eliminar)
+                else:
+                    print("✗ Eliminación cancelada por el usuario")
             else:
                 print("⚠ No hay nodo seleccionado para eliminar")
                 
         except Exception as e:
-            print(f"Error al eliminar nodo con Suprimir: {e}")
+            print(f"Error al eliminar nodo: {e}")
+            QMessageBox.warning(self.view, "Error", 
+                               f"No se pudo eliminar el nodo:\n{str(e)}")
+
+    def keyPressEvent(self, event):
+        """Maneja eventos de teclado globales"""
+        try:
+            # Tecla Suprimir (Delete)
+            if event.key() == Qt.Key_Delete:
+                self.eliminar_nodo_seleccionado()
+                event.accept()
+            # Ctrl+Z para deshacer
+            elif event.key() == Qt.Key_Z and event.modifiers() == Qt.ControlModifier:
+                self.deshacer_movimiento()
+                event.accept()
+            # Ctrl+Y para rehacer
+            elif event.key() == Qt.Key_Y and event.modifiers() == Qt.ControlModifier:
+                self.rehacer_movimiento()
+                event.accept()
+            # Enter para finalizar ruta
+            elif event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+                self.finalizar_ruta_actual()
+                event.accept()
+            # Escape para cancelar ruta
+            elif event.key() == Qt.Key_Escape:
+                self.cancelar_ruta_actual()
+                event.accept()
+            else:
+                event.ignore()
+        except Exception as e:
+            print(f"Error en keyPressEvent: {e}")
+            event.ignore()
 
     # --- SISTEMA DE DESHACER/REHACER (UNDO/REDO) ---
     
@@ -2067,53 +2113,55 @@ class EditorController(QObject):
 
     # --- Event filter para deselección al clicar en fondo ---
     def eventFilter(self, obj, event):
+        # Detectar teclas presionadas
+        if event.type() == QEvent.KeyPress:
+            self.keyPressEvent(event)
+            return True
+        
         # Detectar click izquierdo en el viewport
-        try:
-            if event.type() == QEvent.MouseButtonPress:
-                # Mapear a escena
-                pos = self.view.marco_trabajo.mapToScene(event.pos())
-                
-                # PRIMERO: Si estamos en modo ruta, NO manejar el clic aquí
-                # El RutaController manejará los clics a través de su eventFilter
-                if self.modo_actual == "ruta":
-                    return False  # Dejar que RutaController maneje el clic
-                
-                # SEGUNDO: Comportamiento normal (solo si NO estamos en modo ruta)
-                items = self.scene.items(pos)
-                if not any(isinstance(it, NodoItem) for it in items):
-                    # deseleccionar items de la escena
-                    try:
-                        for it in self.scene.selectedItems():
-                            it.setSelected(False)
-                    except Exception:
-                        pass
-                    # deseleccionar lista de nodos
-                    try:
-                        self.view.nodosList.clearSelection()
-                    except Exception:
-                        pass
-                    # deseleccionar lista de rutas y limpiar highlights
-                    try:
-                        if hasattr(self.view, "rutasList"):
-                            self.view.rutasList.clearSelection()
-                    except Exception:
-                        pass
-                    self._clear_highlight_lines()
-                    # limpiar propertiesTable
-                    try:
-                        self.view.propertiesTable.clear()
-                        self.view.propertiesTable.setRowCount(0)
-                        self.view.propertiesTable.setColumnCount(2)
-                        self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
-                    except Exception:
-                        pass
-                    # Restaurar colores de nodos
-                    for item in self.scene.items():
-                        if isinstance(item, NodoItem):
-                            item.set_normal_color()
-            return False
-        except Exception:
-            return False
+        if event.type() == QEvent.MouseButtonPress:
+            # Mapear a escena
+            pos = self.view.marco_trabajo.mapToScene(event.pos())
+            
+            # PRIMERO: Si estamos en modo ruta, NO manejar el clic aquí
+            # El RutaController manejará los clics a través de su eventFilter
+            if self.modo_actual == "ruta":
+                return False  # Dejar que RutaController maneje el clic
+            
+            # SEGUNDO: Comportamiento normal (solo si NO estamos en modo ruta)
+            items = self.scene.items(pos)
+            if not any(isinstance(it, NodoItem) for it in items):
+                # deseleccionar items de la escena
+                try:
+                    for it in self.scene.selectedItems():
+                        it.setSelected(False)
+                except Exception:
+                    pass
+                # deseleccionar lista de nodos
+                try:
+                    self.view.nodosList.clearSelection()
+                except Exception:
+                    pass
+                # deseleccionar lista de rutas y limpiar highlights
+                try:
+                    if hasattr(self.view, "rutasList"):
+                        self.view.rutasList.clearSelection()
+                except Exception:
+                    pass
+                self._clear_highlight_lines()
+                # limpiar propertiesTable
+                try:
+                    self.view.propertiesTable.clear()
+                    self.view.propertiesTable.setRowCount(0)
+                    self.view.propertiesTable.setColumnCount(2)
+                    self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
+                except Exception:
+                    pass
+                # Restaurar colores de nodos
+                for item in self.scene.items():
+                    if isinstance(item, NodoItem):
+                        item.set_normal_color()
+        return False
 
     def diagnosticar_estado_proyecto(self):
         """Diagnóstico completo del estado del proyecto"""
