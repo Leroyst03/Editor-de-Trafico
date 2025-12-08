@@ -98,6 +98,9 @@ class EditorController(QObject):
         self.visibilidad_nodos = {}  # {nodo_id: visible}
         self.visibilidad_rutas = {}  # {ruta_index: visible}
         
+        # Diccionario para mantener qué rutas contienen cada nodo
+        self.nodo_en_rutas = {}  # {nodo_id: [ruta_index1, ruta_index2, ...]}
+        
         # Conectar botones de visibilidad
         if hasattr(self.view, "btnOcultarTodo"):
             self.view.btnOcultarTodo.clicked.connect(self.ocultar_todo)
@@ -181,6 +184,7 @@ class EditorController(QObject):
         # Limpiar visibilidad
         self.visibilidad_nodos.clear()
         self.visibilidad_rutas.clear()
+        self.nodo_en_rutas.clear()
         
         print("✓ UI completamente limpiada para nuevo proyecto")
 
@@ -360,8 +364,7 @@ class EditorController(QObject):
             elif seleccionados_lista:
                 for i in range(self.view.nodosList.count()):
                     item = self.view.nodosList.item(i)
-                    widget = self.view.nodosList.itemWidget(item)
-                    if widget and hasattr(widget, 'nodo_id') and widget.is_selected():
+                    if item.isSelected():
                         nodo_a_eliminar = item.data(Qt.UserRole)
                         break
             
@@ -1574,9 +1577,11 @@ class EditorController(QObject):
                 # fallback por id
                 self.proyecto.nodos = [n for n in getattr(self.proyecto, "nodos", []) if n.get("id") != nodo_id]
 
-            # 3) Eliminar de visibilidad
+            # 3) Eliminar de visibilidad y relaciones
             if nodo_id in self.visibilidad_nodos:
                 del self.visibilidad_nodos[nodo_id]
+            if nodo_id in self.nodo_en_rutas:
+                del self.nodo_en_rutas[nodo_id]
 
             # 4) RECONFIGURAR RUTAS en lugar de eliminarlas
             try:
@@ -1769,10 +1774,13 @@ class EditorController(QObject):
         except Exception:
             setattr(self.proyecto, "rutas", nuevas_rutas)
         
-        # Actualizar visibilidad de rutas
+        # Actualizar visibilidad de rutas y relaciones
         self.visibilidad_rutas.clear()
+        self.nodo_en_rutas.clear()
         for idx in range(len(nuevas_rutas)):
             self.visibilidad_rutas[idx] = True
+            # Reconstruir relaciones
+            self._actualizar_relaciones_nodo_ruta(idx, nuevas_rutas[idx])
         
         # Redibujar rutas y actualizar UI
         try:
@@ -2271,7 +2279,7 @@ class EditorController(QObject):
         
         print("="*50)
 
-    # --- SISTEMA DE VISIBILIDAD ---
+    # --- SISTEMA DE VISIBILIDAD CON LÓGICA DE RUTAS INCLUYENDO NODOS ---
     
     def inicializar_visibilidad(self):
         """Inicializa el sistema de visibilidad para todos los elementos"""
@@ -2287,8 +2295,67 @@ class EditorController(QObject):
         # Inicializar visibilidad de rutas
         for idx in range(len(self.proyecto.rutas)):
             self.visibilidad_rutas[idx] = True
+            
+        # Inicializar relaciones nodo-ruta
+        self._actualizar_todas_relaciones_nodo_ruta()
         
         print("✓ Sistema de visibilidad inicializado")
+    
+    def _actualizar_todas_relaciones_nodo_ruta(self):
+        """Actualiza todas las relaciones entre nodos y rutas"""
+        self.nodo_en_rutas.clear()
+        
+        for idx, ruta in enumerate(self.proyecto.rutas):
+            self._actualizar_relaciones_nodo_ruta(idx, ruta)
+    
+    def _actualizar_relaciones_nodo_ruta(self, ruta_idx, ruta):
+        """Actualiza las relaciones para una ruta específica"""
+        try:
+            ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+        except Exception:
+            ruta_dict = ruta
+        
+        self._normalize_route_nodes(ruta_dict)
+        
+        # Obtener todos los nodos de la ruta
+        nodos = []
+        if ruta_dict.get("origen"):
+            nodos.append(ruta_dict["origen"])
+        nodos.extend(ruta_dict.get("visita", []) or [])
+        if ruta_dict.get("destino"):
+            nodos.append(ruta_dict["destino"])
+        
+        # Actualizar relaciones
+        for nodo in nodos:
+            if isinstance(nodo, dict):
+                nodo_id = nodo.get('id')
+                if nodo_id is not None:
+                    if nodo_id not in self.nodo_en_rutas:
+                        self.nodo_en_rutas[nodo_id] = []
+                    if ruta_idx not in self.nodo_en_rutas[nodo_id]:
+                        self.nodo_en_rutas[nodo_id].append(ruta_idx)
+    
+    def _obtener_nodos_de_ruta(self, ruta_idx):
+        """Obtiene todos los nodos de una ruta específica"""
+        if ruta_idx >= len(self.proyecto.rutas):
+            return []
+        
+        ruta = self.proyecto.rutas[ruta_idx]
+        try:
+            ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+        except Exception:
+            ruta_dict = ruta
+        
+        self._normalize_route_nodes(ruta_dict)
+        
+        nodos = []
+        if ruta_dict.get("origen"):
+            nodos.append(ruta_dict["origen"])
+        nodos.extend(ruta_dict.get("visita", []) or [])
+        if ruta_dict.get("destino"):
+            nodos.append(ruta_dict["destino"])
+        
+        return nodos
     
     def _actualizar_lista_nodos_con_widgets(self):
         """Actualiza la lista de nodos con widgets personalizados"""
@@ -2442,8 +2509,10 @@ class EditorController(QObject):
                     item.setVisible(nuevo_estado)
                     break
         
-        # Actualizar rutas que contengan este nodo
-        self._dibujar_rutas()
+        # Si el nodo está siendo ocultado, verificar si afecta a rutas
+        if not nuevo_estado:
+            # Actualizar rutas que dependen de este nodo
+            self._dibujar_rutas()
         
         # Actualizar widget en la lista
         self._actualizar_widget_nodo_en_lista(nodo_id)
@@ -2451,7 +2520,7 @@ class EditorController(QObject):
         print(f"Visibilidad nodo {nodo_id}: {nuevo_estado}")
     
     def toggle_visibilidad_ruta(self, ruta_index):
-        """Alterna la visibilidad de una ruta específica"""
+        """Alterna la visibilidad de una ruta específica, incluyendo sus nodos"""
         if not self.proyecto or ruta_index >= len(self.proyecto.rutas):
             return
         
@@ -2463,11 +2532,46 @@ class EditorController(QObject):
         nuevo_estado = not self.visibilidad_rutas[ruta_index]
         self.visibilidad_rutas[ruta_index] = nuevo_estado
         
+        # Obtener todos los nodos de esta ruta
+        nodos_ruta = self._obtener_nodos_de_ruta(ruta_index)
+        
+        if nuevo_estado:
+            # Mostrar la ruta: mostrar todos sus nodos
+            for nodo in nodos_ruta:
+                if isinstance(nodo, dict):
+                    nodo_id = nodo.get('id')
+                    if nodo_id is not None:
+                        self.visibilidad_nodos[nodo_id] = True
+                        # Buscar y mostrar el NodoItem
+                        for item in self.scene.items():
+                            if isinstance(item, NodoItem) and item.nodo.get('id') == nodo_id:
+                                item.setVisible(True)
+                                break
+        else:
+            # Ocultar la ruta: ocultar todos sus nodos
+            for nodo in nodos_ruta:
+                if isinstance(nodo, dict):
+                    nodo_id = nodo.get('id')
+                    if nodo_id is not None:
+                        self.visibilidad_nodos[nodo_id] = False
+                        # Buscar y ocultar el NodoItem
+                        for item in self.scene.items():
+                            if isinstance(item, NodoItem) and item.nodo.get('id') == nodo_id:
+                                item.setVisible(False)
+                                break
+        
         # Actualizar visualización de rutas
         self._dibujar_rutas()
         
-        # Actualizar widget en la lista
+        # Actualizar widgets en las listas
         self._actualizar_widget_ruta_en_lista(ruta_index)
+        
+        # Actualizar widgets de nodos afectados
+        for nodo in nodos_ruta:
+            if isinstance(nodo, dict):
+                nodo_id = nodo.get('id')
+                if nodo_id is not None:
+                    self._actualizar_widget_nodo_en_lista(nodo_id)
         
         print(f"Visibilidad ruta {ruta_index}: {nuevo_estado}")
     
