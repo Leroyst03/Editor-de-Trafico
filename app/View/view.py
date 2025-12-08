@@ -1,10 +1,179 @@
 from PyQt5 import uic
-from PyQt5.QtWidgets import QMainWindow
-from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QPushButton, QLabel, QListWidgetItem, QSizePolicy
+from PyQt5.QtCore import Qt, pyqtSignal, QSize
+from PyQt5.QtGui import QFont
 import os
 import sys
 from pathlib import Path
 from View.zoom_view import ZoomGraphicsView
+
+# ===== WIDGETS PERSONALIZADOS PARA LISTAS =====
+
+class NodoListItemWidget(QWidget):
+    """Widget personalizado para ítems de nodo en la lista lateral"""
+    toggle_visibilidad = pyqtSignal(int)  # Señal con nodo_id
+    
+    def __init__(self, nodo_id, texto, visible=True, parent=None):
+        super().__init__(parent)
+        self.nodo_id = nodo_id
+        self.visible = visible
+        
+        # Layout horizontal
+        layout = QHBoxLayout()
+        layout.setContentsMargins(2, 1, 2, 1)  # Márgenes más pequeños
+        layout.setSpacing(3)  # Espaciado reducido
+        
+        # Etiqueta con texto (ocupa la mayor parte del espacio)
+        self.lbl_texto = QLabel(texto)
+        self.lbl_texto.setStyleSheet("color: #e0e0e0; padding: 1px;")
+        self.lbl_texto.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        
+        # Botón de ojo pequeño a la derecha
+        self.btn_ojo = QPushButton()
+        self.btn_ojo.setFixedSize(20, 20)  # Más pequeño: 20x20px
+        self.btn_ojo.setObjectName("btnOjo")
+        self.btn_ojo.clicked.connect(self._on_toggle_visibilidad)
+        
+        # Añadir primero el texto, luego el botón
+        layout.addWidget(self.lbl_texto, 1)  # Factor de estiramiento 1
+        layout.addWidget(self.btn_ojo, 0, Qt.AlignRight)  # Sin estiramiento, alineado a la derecha
+        
+        self.setLayout(layout)
+        self.actualizar_estado()
+    
+    def _on_toggle_visibilidad(self):
+        """Emite señal cuando se hace clic en el botón de ojo"""
+        self.toggle_visibilidad.emit(self.nodo_id)
+    
+    def actualizar_estado(self):
+        """Actualiza la apariencia del botón según el estado de visibilidad"""
+        if self.visible:
+            self.btn_ojo.setStyleSheet("""
+                QPushButton#btnOjo {
+                    background-color: #4CAF50;
+                    border: 1px solid #388E3C;
+                    border-radius: 3px;
+                    color: white;
+                    font-size: 9px;
+                    font-weight: bold;
+                    padding: 0px;
+                    margin: 0px;
+                }
+                QPushButton#btnOjo:hover {
+                    background-color: #45a049;
+                    border-color: #2E7D32;
+                }
+            """)
+            self.btn_ojo.setText("👁")
+            self.lbl_texto.setStyleSheet("color: #e0e0e0; padding: 1px; font-size: 10px;")
+        else:
+            self.btn_ojo.setStyleSheet("""
+                QPushButton#btnOjo {
+                    background-color: #f44336;
+                    border: 1px solid #D32F2F;
+                    border-radius: 3px;
+                    color: white;
+                    font-size: 9px;
+                    font-weight: bold;
+                    padding: 0px;
+                    margin: 0px;
+                }
+                QPushButton#btnOjo:hover {
+                    background-color: #da190b;
+                    border-color: #B71C1C;
+                }
+            """)
+            self.btn_ojo.setText("👁")
+            self.lbl_texto.setStyleSheet("color: #666666; text-decoration: line-through; padding: 1px; font-size: 10px;")
+
+    def set_visible(self, visible):
+        """Establece el estado de visibilidad y actualiza"""
+        self.visible = visible
+        self.actualizar_estado()
+
+class RutaListItemWidget(QWidget):
+    """Widget personalizado para ítems de ruta en la lista lateral"""
+    toggle_visibilidad = pyqtSignal(int)  # Señal con ruta_index
+    
+    def __init__(self, ruta_index, texto, visible=True, parent=None):
+        super().__init__(parent)
+        self.ruta_index = ruta_index
+        self.visible = visible
+        
+        # Layout horizontal
+        layout = QHBoxLayout()
+        layout.setContentsMargins(2, 1, 2, 1)  # Márgenes más pequeños
+        layout.setSpacing(3)  # Espaciado reducido
+        
+        # Etiqueta con texto (ocupa la mayor parte del espacio)
+        self.lbl_texto = QLabel(texto)
+        self.lbl_texto.setStyleSheet("color: #e0e0e0; padding: 1px;")
+        self.lbl_texto.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        
+        # Botón de ojo pequeño a la derecha
+        self.btn_ojo = QPushButton()
+        self.btn_ojo.setFixedSize(20, 20)  # Más pequeño: 20x20px
+        self.btn_ojo.setObjectName("btnOjo")
+        self.btn_ojo.clicked.connect(self._on_toggle_visibilidad)
+        
+        # Añadir primero el texto, luego el botón
+        layout.addWidget(self.lbl_texto, 1)  # Factor de estiramiento 1
+        layout.addWidget(self.btn_ojo, 0, Qt.AlignRight)  # Sin estiramiento, alineado a la derecha
+        
+        self.setLayout(layout)
+        self.actualizar_estado()
+    
+    def _on_toggle_visibilidad(self):
+        """Emite señal cuando se hace clic en el botón de ojo"""
+        self.toggle_visibilidad.emit(self.ruta_index)
+    
+    def actualizar_estado(self):
+        """Actualiza la apariencia del botón según el estado de visibilidad"""
+        if self.visible:
+            self.btn_ojo.setStyleSheet("""
+                QPushButton#btnOjo {
+                    background-color: #2196F3;
+                    border: 1px solid #1976D2;
+                    border-radius: 3px;
+                    color: white;
+                    font-size: 9px;
+                    font-weight: bold;
+                    padding: 0px;
+                    margin: 0px;
+                }
+                QPushButton#btnOjo:hover {
+                    background-color: #0b7dda;
+                    border-color: #1565C0;
+                }
+            """)
+            self.btn_ojo.setText("👁")
+            self.lbl_texto.setStyleSheet("color: #e0e0e0; padding: 1px; font-size: 10px;")
+        else:
+            self.btn_ojo.setStyleSheet("""
+                QPushButton#btnOjo {
+                    background-color: #ff9800;
+                    border: 1px solid #F57C00;
+                    border-radius: 3px;
+                    color: white;
+                    font-size: 9px;
+                    font-weight: bold;
+                    padding: 0px;
+                    margin: 0px;
+                }
+                QPushButton#btnOjo:hover {
+                    background-color: #e68a00;
+                    border-color: #EF6C00;
+                }
+            """)
+            self.btn_ojo.setText("👁")
+            self.lbl_texto.setStyleSheet("color: #666666; text-decoration: line-through; padding: 1px; font-size: 10px;")
+
+    def set_visible(self, visible):
+        """Establece el estado de visibilidad y actualiza"""
+        self.visible = visible
+        self.actualizar_estado()
+
+# ===== CLASE PRINCIPAL DE LA VISTA =====
 
 class EditorView(QMainWindow):
     def __init__(self):

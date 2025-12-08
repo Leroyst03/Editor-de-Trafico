@@ -4,11 +4,12 @@ from PyQt5.QtWidgets import (
     QTableWidgetItem, QHeaderView, QMenu, QMessageBox
 )
 from PyQt5.QtGui import QPixmap, QPen, QColor
-from PyQt5.QtCore import Qt, QEvent, QObject
+from PyQt5.QtCore import Qt, QEvent, QObject, QSize
 from Model.Proyecto import Proyecto
 from Controller.mover_controller import MoverController
 from Controller.colocar_controller import ColocarController
 from Controller.ruta_controller import RutaController
+from View.view import NodoListItemWidget, RutaListItemWidget
 from View.node_item import NodoItem
 import ast
 
@@ -93,9 +94,20 @@ class EditorController(QObject):
         # Movimiento actual en progreso (para guardar en historial)
         self.movimiento_actual = None  # {'nodo': nodo_item, 'x_inicial': x, 'y_inicial': y}
         
+        # --- SISTEMA DE VISIBILIDAD ---
+        self.visibilidad_nodos = {}  # {nodo_id: visible}
+        self.visibilidad_rutas = {}  # {ruta_index: visible}
+        
+        # Conectar botones de visibilidad
+        if hasattr(self.view, "btnOcultarTodo"):
+            self.view.btnOcultarTodo.clicked.connect(self.ocultar_todo)
+        if hasattr(self.view, "btnMostrarTodo"):
+            self.view.btnMostrarTodo.clicked.connect(self.mostrar_todo)
+        
         # Si hay proyecto inicial, configurarlo
         if self.proyecto:
             self._actualizar_referencias_proyecto(self.proyecto)
+            self.inicializar_visibilidad()
 
     # --- MÉTODOS NUEVOS PARA MANEJO DE PROYECTO ---
     
@@ -165,6 +177,10 @@ class EditorController(QObject):
         
         # Limpiar historial cuando se crea/abre un nuevo proyecto
         self._limpiar_historial()
+        
+        # Limpiar visibilidad
+        self.visibilidad_nodos.clear()
+        self.visibilidad_rutas.clear()
         
         print("✓ UI completamente limpiada para nuevo proyecto")
 
@@ -342,15 +358,15 @@ class EditorController(QObject):
             
             # Si no hay selección en la escena, buscar en la lista lateral
             elif seleccionados_lista:
-                nodo_a_eliminar = seleccionados_lista[0].data(Qt.UserRole)
-                # Buscar el NodoItem correspondiente en la escena
-                for item in self.scene.items():
-                    if isinstance(item, NodoItem) and item.nodo == nodo_a_eliminar:
-                        nodo_item_a_eliminar = item
+                for i in range(self.view.nodosList.count()):
+                    item = self.view.nodosList.item(i)
+                    widget = self.view.nodosList.itemWidget(item)
+                    if widget and hasattr(widget, 'nodo_id') and widget.is_selected():
+                        nodo_a_eliminar = item.data(Qt.UserRole)
                         break
             
             # Si encontramos un nodo para eliminar
-            if nodo_a_eliminar and nodo_item_a_eliminar:
+            if nodo_a_eliminar:
                 nodo_id = nodo_a_eliminar.get('id')
                 
                 # Mostrar cuadro de confirmación
@@ -365,7 +381,13 @@ class EditorController(QObject):
                 
                 if reply == QMessageBox.Yes:
                     print(f"✓ Eliminando nodo ID {nodo_id}")
-                    self.eliminar_nodo(nodo_a_eliminar, nodo_item_a_eliminar)
+                    # Buscar el NodoItem en la escena
+                    for item in self.scene.items():
+                        if isinstance(item, NodoItem) and item.nodo.get('id') == nodo_id:
+                            nodo_item_a_eliminar = item
+                            break
+                    if nodo_item_a_eliminar:
+                        self.eliminar_nodo(nodo_a_eliminar, nodo_item_a_eliminar)
                 else:
                     print("✗ Eliminación cancelada por el usuario")
             else:
@@ -613,6 +635,9 @@ class EditorController(QObject):
         # Resetear botones y modo
         self._resetear_modo_actual()
         
+        # Inicializar sistema de visibilidad
+        self.inicializar_visibilidad()
+        
         print("✓ Nuevo proyecto creado con mapa:", ruta_mapa)
         self.diagnosticar_estado_proyecto()
 
@@ -653,10 +678,11 @@ class EditorController(QObject):
                     except Exception:
                         pass
 
-                item = QListWidgetItem(f"ID {nodo.get('id')} - ({nodo.get('X')}, {nodo.get('Y')})")
-                item.setData(Qt.UserRole, nodo)
-                self.view.nodosList.addItem(item)
-
+            # Inicializar sistema de visibilidad
+            self.inicializar_visibilidad()
+            
+            # Actualizar listas con widgets
+            self._actualizar_lista_nodos_con_widgets()
             self._dibujar_rutas()
             self._mostrar_rutas_lateral()
 
@@ -740,6 +766,11 @@ class EditorController(QObject):
         # Primero agregar al modelo
         nodo = self.proyecto.agregar_nodo(x, y)
 
+        # Actualizar visibilidad
+        nodo_id = nodo.get('id')
+        if nodo_id is not None:
+            self.visibilidad_nodos[nodo_id] = True
+
         # Crear NodoItem con referencia al editor usando helper centralizado
         try:
             nodo_item = self._create_nodo_item(nodo)
@@ -756,10 +787,8 @@ class EditorController(QObject):
             except Exception:
                 pass
 
-        # Añadir a la lista lateral
-        item = QListWidgetItem(f"ID {nodo.get('id')} - ({nodo.get('X')}, {nodo.get('Y')})")
-        item.setData(Qt.UserRole, nodo)
-        self.view.nodosList.addItem(item)
+        # Actualizar lista de nodos con widgets
+        self._actualizar_lista_nodos_con_widgets()
 
         print("Nodo creado:", getattr(nodo, "to_dict", lambda: nodo)())
 
@@ -915,32 +944,41 @@ class EditorController(QObject):
         items = self.view.nodosList.selectedItems()
         if not items:
             return
-        nodo = items[0].data(Qt.UserRole)
-
-        self._changing_selection = True
-        try:
-            # Deseleccionar rutas primero
-            if hasattr(self.view, "rutasList"):
-                self.view.rutasList.clearSelection()
-            
-            # Primero restaurar todos los nodos a color normal
-            self.restaurar_colores_nodos()
-            
-            # Deseleccionar todo en la escena primero
-            for scene_item in self.scene.selectedItems():
-                scene_item.setSelected(False)
-            
-            # Buscar y seleccionar el nodo correspondiente
-            for scene_item in self.scene.items():
-                if isinstance(scene_item, NodoItem) and scene_item.nodo == nodo:
-                    scene_item.setSelected(True)
-                    # Solo aplicar color de selección (no de ruta)
-                    scene_item.set_selected_color()
-                    self.view.marco_trabajo.centerOn(scene_item)
-                    self.mostrar_propiedades_nodo(nodo)
+        
+        # Obtener el nodo del widget
+        for i in range(self.view.nodosList.count()):
+            item = self.view.nodosList.item(i)
+            if item.isSelected():
+                widget = self.view.nodosList.itemWidget(item)
+                if widget and hasattr(widget, 'nodo_id'):
+                    nodo_id = widget.nodo_id
+                    nodo = self.obtener_nodo_por_id(nodo_id)
+                    if nodo:
+                        self._changing_selection = True
+                        try:
+                            # Deseleccionar rutas primero
+                            if hasattr(self.view, "rutasList"):
+                                self.view.rutasList.clearSelection()
+                            
+                            # Primero restaurar todos los nodos a color normal
+                            self.restaurar_colores_nodos()
+                            
+                            # Deseleccionar todo en la escena primero
+                            for scene_item in self.scene.selectedItems():
+                                scene_item.setSelected(False)
+                            
+                            # Buscar y seleccionar el nodo correspondiente
+                            for scene_item in self.scene.items():
+                                if isinstance(scene_item, NodoItem) and scene_item.nodo.get('id') == nodo_id:
+                                    scene_item.setSelected(True)
+                                    # Solo aplicar color de selección (no de ruta)
+                                    scene_item.set_selected_color()
+                                    self.view.marco_trabajo.centerOn(scene_item)
+                                    self.mostrar_propiedades_nodo(nodo)
+                                    break
+                        finally:
+                            self._changing_selection = False
                     break
-        finally:
-            self._changing_selection = False
 
     def seleccionar_nodo_desde_mapa(self):
         if self._changing_selection:
@@ -993,9 +1031,11 @@ class EditorController(QObject):
             nodo_item.set_selected_color()
             
             # Sincronizar con la lista lateral
+            nodo_id = nodo.get('id')
             for i in range(self.view.nodosList.count()):
                 item = self.view.nodosList.item(i)
-                if item.data(Qt.UserRole) == nodo:
+                widget = self.view.nodosList.itemWidget(item)
+                if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo_id:
                     self.view.nodosList.setCurrentItem(item)
                     self.mostrar_propiedades_nodo(nodo)
                     break
@@ -1037,9 +1077,11 @@ class EditorController(QObject):
                     break
             
             # Sincronizar con la lista lateral
+            nodo_id = nodo.get('id')
             for i in range(self.view.nodosList.count()):
                 item = self.view.nodosList.item(i)
-                if item.data(Qt.UserRole) == nodo:
+                widget = self.view.nodosList.itemWidget(item)
+                if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo_id:
                     self.view.nodosList.setCurrentItem(item)
                     self.mostrar_propiedades_nodo(nodo)
                     break
@@ -1048,47 +1090,32 @@ class EditorController(QObject):
 
     def actualizar_lista_nodo(self, nodo):
         """Actualizar la lista lateral del panel de propiedades con las coordenadas nuevas"""
+        nodo_id = nodo.get('id')
         for i in range(self.view.nodosList.count()):
             item = self.view.nodosList.item(i)
-            if item.data(Qt.UserRole) == nodo:
-                item.setText(f"ID {nodo.get('id')} - ({nodo.get('X')}, {nodo.get('Y')})")
+            widget = self.view.nodosList.itemWidget(item)
+            if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo_id:
+                x = nodo.get('X', 0)
+                y = nodo.get('Y', 0)
+                widget.lbl_texto.setText(f"ID {nodo_id} - ({x}, {y})")
                 break
 
         # Refrescar el panel de propiedades si el nodo esta seleccionado
         seleccionados = self.view.nodosList.selectedItems()
-        if seleccionados and seleccionados[0].data(Qt.UserRole) == nodo:
-            self.mostrar_propiedades_nodo(nodo)
+        if seleccionados:
+            for i in range(self.view.nodosList.count()):
+                item = self.view.nodosList.item(i)
+                if item.isSelected():
+                    widget = self.view.nodosList.itemWidget(item)
+                    if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo_id:
+                        self.mostrar_propiedades_nodo(nodo)
+                        break
 
     def _mostrar_rutas_lateral(self):
         """
-        Rellena la lista lateral de rutas. Cada item contiene la ruta (dict) en Qt.UserRole.
-        La etiqueta es compacta (OrigenID -> DestinoID) pero la edición y detalles se hacen en propertiesTable.
+        Rellena la lista lateral de rutas con widgets personalizados.
         """
-        if not hasattr(self.view, "rutasList") or not self.proyecto:
-            return
-
-        self.view.rutasList.clear()
-
-        for idx, ruta in enumerate(self.proyecto.rutas, start=1):
-            try:
-                ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
-            except Exception:
-                ruta_dict = ruta
-
-            # Normalizar para obtener ids legibles
-            self._normalize_route_nodes(ruta_dict)
-            origen = ruta_dict.get("origen")
-            destino = ruta_dict.get("destino")
-
-            origen_id = origen.get("id", "?") if isinstance(origen, dict) else str(origen)
-            destino_id = destino.get("id", "?") if isinstance(destino, dict) else str(destino)
-
-            item_text = f"Ruta {idx}: Origen {origen_id} → Destino {destino_id}"
-            item = QListWidgetItem(item_text)
-            # Guardamos la referencia al dict real (no a una copia) si es posible
-            item.setData(Qt.UserRole, ruta_dict)
-            item.setFlags(item.flags() | Qt.ItemIsSelectable | Qt.ItemIsEnabled)
-            self.view.rutasList.addItem(item)
+        self._actualizar_lista_rutas_con_widgets()
 
     def seleccionar_ruta_desde_lista(self):
         """
@@ -1128,8 +1155,17 @@ class EditorController(QObject):
             return
 
         # Guardar el índice de la ruta seleccionada
-        self.ruta_actual_idx = self.view.rutasList.currentRow()
-        ruta = items[0].data(Qt.UserRole)
+        for i in range(self.view.rutasList.count()):
+            item = self.view.rutasList.item(i)
+            if item.isSelected():
+                widget = self.view.rutasList.itemWidget(item)
+                if widget and hasattr(widget, 'ruta_index'):
+                    self.ruta_actual_idx = widget.ruta_index
+                    ruta = self.obtener_ruta_por_indice(self.ruta_actual_idx)
+                    break
+        
+        if self.ruta_actual_idx is None:
+            return
 
         # IMPORTANTE: Restaurar todos los nodos a color normal primero
         for item in self.scene.items():
@@ -1377,6 +1413,10 @@ class EditorController(QObject):
         self._route_lines = []
 
         for ruta_idx, ruta in enumerate(self.proyecto.rutas):
+            # Verificar si la ruta está visible
+            if not self.visibilidad_rutas.get(ruta_idx, True):
+                continue
+                
             try:
                 ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
             except Exception as e:
@@ -1399,6 +1439,19 @@ class EditorController(QObject):
 
             if len(puntos) < 2:
                 print(f"DEBUG: Ruta {ruta_idx} tiene menos de 2 puntos")
+                self._route_lines.append([])
+                continue
+
+            # Verificar que todos los nodos de la ruta estén visibles
+            todos_visibles = True
+            for punto in puntos:
+                if isinstance(punto, dict):
+                    nodo_id = punto.get('id')
+                    if nodo_id is not None and not self.visibilidad_nodos.get(nodo_id, True):
+                        todos_visibles = False
+                        break
+            
+            if not todos_visibles:
                 self._route_lines.append([])
                 continue
 
@@ -1521,16 +1574,9 @@ class EditorController(QObject):
                 # fallback por id
                 self.proyecto.nodos = [n for n in getattr(self.proyecto, "nodos", []) if n.get("id") != nodo_id]
 
-            # 3) Quitar de la lista lateral por id
-            try:
-                for i in range(self.view.nodosList.count()):
-                    item = self.view.nodosList.item(i)
-                    data = item.data(Qt.UserRole)
-                    if hasattr(data, "get") and data.get("id") == nodo_id:
-                        self.view.nodosList.takeItem(i)
-                        break
-            except Exception:
-                pass
+            # 3) Eliminar de visibilidad
+            if nodo_id in self.visibilidad_nodos:
+                del self.visibilidad_nodos[nodo_id]
 
             # 4) RECONFIGURAR RUTAS en lugar de eliminarlas
             try:
@@ -1548,14 +1594,20 @@ class EditorController(QObject):
             try:
                 seleccionados = self.view.nodosList.selectedItems()
                 if seleccionados:
-                    sel = seleccionados[0].data(Qt.UserRole)
-                    if hasattr(sel, "get") and sel.get("id") == nodo_id:
-                        self.view.propertiesTable.clear()
-                        self.view.propertiesTable.setRowCount(0)
-                        self.view.propertiesTable.setColumnCount(2)
-                        self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
+                    for i in range(self.view.nodosList.count()):
+                        item = self.view.nodosList.item(i)
+                        widget = self.view.nodosList.itemWidget(item)
+                        if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo_id:
+                            self.view.propertiesTable.clear()
+                            self.view.propertiesTable.setRowCount(0)
+                            self.view.propertiesTable.setColumnCount(2)
+                            self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
+                            break
             except Exception:
                 pass
+
+            # 6) Actualizar lista de nodos
+            self._actualizar_lista_nodos_con_widgets()
 
             print(f"Nodo eliminado: {nodo_id}")
         except Exception as err:
@@ -1716,6 +1768,11 @@ class EditorController(QObject):
             self.proyecto.rutas = nuevas_rutas
         except Exception:
             setattr(self.proyecto, "rutas", nuevas_rutas)
+        
+        # Actualizar visibilidad de rutas
+        self.visibilidad_rutas.clear()
+        for idx in range(len(nuevas_rutas)):
+            self.visibilidad_rutas[idx] = True
         
         # Redibujar rutas y actualizar UI
         try:
@@ -2097,8 +2154,11 @@ class EditorController(QObject):
         try:
             for i in range(self.view.nodosList.count()):
                 li = self.view.nodosList.item(i)
-                if li.data(Qt.UserRole) == nodo:
-                    li.setText(f"ID {nodo.get('id')} - ({nodo.get('X')}, {nodo.get('Y')})")
+                widget = self.view.nodosList.itemWidget(li)
+                if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo.get('id'):
+                    x = nodo.get('X', 0)
+                    y = nodo.get('Y', 0)
+                    widget.lbl_texto.setText(f"ID {nodo.get('id')} - ({x}, {y})")
                     break
         except Exception:
             pass
@@ -2106,8 +2166,14 @@ class EditorController(QObject):
         # Si la tabla de propiedades está mostrando este nodo, mantenerla sincronizada
         try:
             seleccionados = self.view.nodosList.selectedItems()
-            if seleccionados and seleccionados[0].data(Qt.UserRole) == nodo:
-                self.actualizar_propiedades_valores(nodo, claves=("X", "Y"))
+            if seleccionados:
+                for i in range(self.view.nodosList.count()):
+                    item = self.view.nodosList.item(i)
+                    if item.isSelected():
+                        widget = self.view.nodosList.itemWidget(item)
+                        if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo.get('id'):
+                            self.actualizar_propiedades_valores(nodo, claves=("X", "Y"))
+                            break
         except Exception:
             pass
 
@@ -2204,3 +2270,237 @@ class EditorController(QObject):
                 print(f"  Ruta {i}: ERROR - {e}")
         
         print("="*50)
+
+    # --- SISTEMA DE VISIBILIDAD ---
+    
+    def inicializar_visibilidad(self):
+        """Inicializa el sistema de visibilidad para todos los elementos"""
+        if not self.proyecto:
+            return
+        
+        # Inicializar visibilidad de nodos
+        for nodo in self.proyecto.nodos:
+            nodo_id = nodo.get('id')
+            if nodo_id is not None:
+                self.visibilidad_nodos[nodo_id] = True
+        
+        # Inicializar visibilidad de rutas
+        for idx in range(len(self.proyecto.rutas)):
+            self.visibilidad_rutas[idx] = True
+        
+        print("✓ Sistema de visibilidad inicializado")
+    
+    def _actualizar_lista_nodos_con_widgets(self):
+        """Actualiza la lista de nodos con widgets personalizados"""
+        self.view.nodosList.clear()
+        
+        for nodo in self.proyecto.nodos:
+            nodo_id = nodo.get('id')
+            x = nodo.get('X', 0)
+            y = nodo.get('Y', 0)
+            texto = f"ID {nodo_id} - ({x}, {y})"
+            
+            item = QListWidgetItem()
+            item.setData(Qt.UserRole, nodo)
+            item.setSizeHint(QSize(0, 24))  # Altura reducida a 24px
+            
+            widget = NodoListItemWidget(
+                nodo_id, 
+                texto, 
+                self.visibilidad_nodos.get(nodo_id, True)
+            )
+            widget.toggle_visibilidad.connect(self.toggle_visibilidad_nodo)
+            
+            self.view.nodosList.addItem(item)
+            self.view.nodosList.setItemWidget(item, widget)
+    
+    def _actualizar_lista_rutas_con_widgets(self):
+        """Actualiza la lista de rutas con widgets personalizados"""
+        if not hasattr(self.view, "rutasList"):
+            return
+            
+        self.view.rutasList.clear()
+        
+        for idx, ruta in enumerate(self.proyecto.rutas):
+            try:
+                ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+            except Exception:
+                ruta_dict = ruta
+
+            # Normalizar para obtener ids legibles
+            self._normalize_route_nodes(ruta_dict)
+            origen = ruta_dict.get("origen")
+            destino = ruta_dict.get("destino")
+
+            origen_id = origen.get("id", "?") if isinstance(origen, dict) else str(origen)
+            destino_id = destino.get("id", "?") if isinstance(destino, dict) else str(destino)
+
+            # Texto más compacto
+            item_text = f"R{idx+1}: {origen_id}→{destino_id}"
+            
+            item = QListWidgetItem()
+            item.setData(Qt.UserRole, ruta_dict)
+            item.setFlags(item.flags() | Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+            item.setSizeHint(QSize(0, 24))  # Altura reducida a 24px
+            
+            widget = RutaListItemWidget(
+                idx, 
+                item_text, 
+                self.visibilidad_rutas.get(idx, True)
+            )
+            widget.toggle_visibilidad.connect(self.toggle_visibilidad_ruta)
+            
+            self.view.rutasList.addItem(item)
+            self.view.rutasList.setItemWidget(item, widget)
+    
+    def ocultar_todo(self):
+        """Oculta todos los nodos y rutas de la interfaz"""
+        if not self.proyecto:
+            QMessageBox.warning(self.view, "Advertencia", "No hay proyecto cargado")
+            return
+        
+        print("Ocultando todos los elementos...")
+        
+        # Ocultar todos los nodos en la escena
+        for item in self.scene.items():
+            if isinstance(item, NodoItem):
+                item.setVisible(False)
+                nodo_id = item.nodo.get('id')
+                if nodo_id is not None:
+                    self.visibilidad_nodos[nodo_id] = False
+        
+        # Ocultar todas las rutas
+        for idx in range(len(self.proyecto.rutas)):
+            self.visibilidad_rutas[idx] = False
+        
+        # Limpiar líneas de rutas
+        self._clear_route_lines()
+        self._clear_highlight_lines()
+        
+        # Actualizar listas laterales
+        self._actualizar_lista_nodos_con_widgets()
+        self._actualizar_lista_rutas_con_widgets()
+        
+        # Limpiar selección de rutas
+        if hasattr(self.view, "rutasList"):
+            self.view.rutasList.clearSelection()
+        
+        # Limpiar tabla de propiedades
+        self.view.propertiesTable.clear()
+        self.view.propertiesTable.setRowCount(0)
+        self.view.propertiesTable.setColumnCount(2)
+        self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
+        
+        print("✓ Todos los elementos ocultados")
+    
+    def mostrar_todo(self):
+        """Muestra todos los nodos y rutas de la interfaz"""
+        if not self.proyecto:
+            QMessageBox.warning(self.view, "Advertencia", "No hay proyecto cargado")
+            return
+        
+        print("Mostrando todos los elementos...")
+        
+        # Mostrar todos los nodos en la escena
+        for item in self.scene.items():
+            if isinstance(item, NodoItem):
+                item.setVisible(True)
+                nodo_id = item.nodo.get('id')
+                if nodo_id is not None:
+                    self.visibilidad_nodos[nodo_id] = True
+        
+        # Mostrar todas las rutas
+        for idx in range(len(self.proyecto.rutas)):
+            self.visibilidad_rutas[idx] = True
+        
+        # Redibujar rutas
+        self._dibujar_rutas()
+        
+        # Actualizar listas laterales
+        self._actualizar_lista_nodos_con_widgets()
+        self._actualizar_lista_rutas_con_widgets()
+        
+        print("✓ Todos los elementos mostrados")
+    
+    def toggle_visibilidad_nodo(self, nodo_id):
+        """Alterna la visibilidad de un nodo específico"""
+        if not self.proyecto:
+            return
+        
+        # Inicializar si no está inicializado
+        if nodo_id not in self.visibilidad_nodos:
+            self.visibilidad_nodos[nodo_id] = True
+        
+        # Alternar estado
+        nuevo_estado = not self.visibilidad_nodos[nodo_id]
+        self.visibilidad_nodos[nodo_id] = nuevo_estado
+        
+        # Buscar y actualizar el NodoItem correspondiente en la escena
+        for item in self.scene.items():
+            if isinstance(item, NodoItem):
+                if item.nodo.get('id') == nodo_id:
+                    item.setVisible(nuevo_estado)
+                    break
+        
+        # Actualizar rutas que contengan este nodo
+        self._dibujar_rutas()
+        
+        # Actualizar widget en la lista
+        self._actualizar_widget_nodo_en_lista(nodo_id)
+        
+        print(f"Visibilidad nodo {nodo_id}: {nuevo_estado}")
+    
+    def toggle_visibilidad_ruta(self, ruta_index):
+        """Alterna la visibilidad de una ruta específica"""
+        if not self.proyecto or ruta_index >= len(self.proyecto.rutas):
+            return
+        
+        # Inicializar si no está inicializado
+        if ruta_index not in self.visibilidad_rutas:
+            self.visibilidad_rutas[ruta_index] = True
+        
+        # Alternar estado
+        nuevo_estado = not self.visibilidad_rutas[ruta_index]
+        self.visibilidad_rutas[ruta_index] = nuevo_estado
+        
+        # Actualizar visualización de rutas
+        self._dibujar_rutas()
+        
+        # Actualizar widget en la lista
+        self._actualizar_widget_ruta_en_lista(ruta_index)
+        
+        print(f"Visibilidad ruta {ruta_index}: {nuevo_estado}")
+    
+    def _actualizar_widget_nodo_en_lista(self, nodo_id):
+        """Actualiza el widget de un nodo en la lista lateral"""
+        for i in range(self.view.nodosList.count()):
+            item = self.view.nodosList.item(i)
+            widget = self.view.nodosList.itemWidget(item)
+            if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo_id:
+                widget.set_visible(self.visibilidad_nodos.get(nodo_id, True))
+                break
+    
+    def _actualizar_widget_ruta_en_lista(self, ruta_index):
+        """Actualiza el widget de una ruta en la lista lateral"""
+        if not hasattr(self.view, "rutasList"):
+            return
+            
+        for i in range(self.view.rutasList.count()):
+            item = self.view.rutasList.item(i)
+            widget = self.view.rutasList.itemWidget(item)
+            if widget and hasattr(widget, 'ruta_index') and widget.ruta_index == ruta_index:
+                widget.set_visible(self.visibilidad_rutas.get(ruta_index, True))
+                break
+    
+    def obtener_nodo_por_id(self, nodo_id):
+        """Busca un nodo por su ID"""
+        for nodo in self.proyecto.nodos:
+            if nodo.get('id') == nodo_id:
+                return nodo
+        return None
+    
+    def obtener_ruta_por_indice(self, ruta_index):
+        """Busca una ruta por su índice"""
+        if 0 <= ruta_index < len(self.proyecto.rutas):
+            return self.proyecto.rutas[ruta_index]
+        return None

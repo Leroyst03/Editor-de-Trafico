@@ -10,9 +10,10 @@ QPushButton {
     color: #e0e0e0;
     border: 1px solid #444;
     border-radius: 4px;
-    padding: 8px 16px;
+    padding: 6px 12px;
     font-weight: bold;
-    min-width: 80px;
+    min-width: 70px;
+    font-size: 11px;
 }
 
 QPushButton:hover {
@@ -32,6 +33,7 @@ QMenuBar {
     color: #e0e0e0;
     border-bottom: 1px solid #444;
     padding: 2px;
+    font-size: 11px;
 }
 
 QMenuBar::item {
@@ -56,11 +58,12 @@ QMenu {
     border: 1px solid #444;
     border-radius: 4px;
     padding: 5px;
+    font-size: 11px;
 }
 
 QMenu::item {
     background-color: transparent;
-    padding: 5px 20px 5px 20px;
+    padding: 5px 15px 5px 15px;
     border-radius: 3px;
     margin: 2px;
 }
@@ -81,6 +84,7 @@ QStatusBar {
     background-color: #2b2b2b;
     color: #e0e0e0;
     border-top: 1px solid #444;
+    font-size: 10px;
 }
 
 /* ===== ÁREA DE TRABAJO (QGraphicsView) ===== */
@@ -96,9 +100,10 @@ QGroupBox {
     color: #e0e0e0;
     border: 2px solid #2b2b2b;
     border-radius: 5px;
-    margin-top: 10px;
-    padding-top: 10px;
+    margin-top: 5px;
+    padding-top: 8px;
     font-weight: bold;
+    font-size: 11px;
 }
 
 /* ===== LISTAS (Nodos y Rutas) ===== */
@@ -107,11 +112,17 @@ QListWidget {
     color: #e0e0e0;
     border: 1px solid #444;
     border-radius: 3px;
+    font-size: 10px;
+}
+
+QListWidget::item {
+    background-color: transparent;
+    padding: 0px;
+    margin: 0px;
 }
 
 QListWidget::item:selected {
     background-color: #1a73e8;
-    color: white;
 }
 
 /* ===== TABLA DE PROPIEDADES ===== */
@@ -121,13 +132,103 @@ QTableWidget {
     border: 1px solid #444;
     border-radius: 3px;
     gridline-color: #333;
+    font-size: 10px;
 }
 
 QHeaderView::section {
     background-color: #2b2b2b;
     color: #e0e0e0;
-    padding: 5px;
+    padding: 4px;
     border: none;
     border-right: 1px solid #444;
     border-bottom: 1px solid #444;
+    font-size: 10px;
+}
+
+/* ===== BOTONES DE VISIBILIDAD ===== */
+QPushButton#btnOcultarTodo, QPushButton#btnMostrarTodo {
+    background-color: #2b2b2b;
+    color: #e0e0e0;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-weight: bold;
+    min-width: 90px;
+    max-width: 90px;
+    min-height: 25px;
+    max-height: 25px;
+    font-size: 10px;
+}
+
+QPushButton#btnOcultarTodo:hover {
+    background-color: #f44336;
+    border-color: #f44336;
+}
+
+QPushButton#btnMostrarTodo:hover {
+    background-color: #4CAF50;
+    border-color: #4CAF50;
+}
+
+/* ===== BOTONES DE OJO EN LISTAS ===== */
+QPushButton#btnOjo {
+    font-size: 9px;
+    font-weight: bold;
+    padding: 0px;
+    margin: 0px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+}
+
+/* ===== ETIQUETAS EN WIDGETS PERSONALIZADOS ===== */
+QLabel {
+    background-color: transparent;
+    padding: 0px;
+    margin: 0px;
+    font-size: 10px;
+}
+
+/* ===== SCROLLBARS ===== */
+QScrollBar:vertical {
+    border: none;
+    background-color: #2b2b2b;
+    width: 10px;
+    margin: 0px;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #444;
+    border-radius: 5px;
+    min-height: 20px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #555;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+QScrollBar:horizontal {
+    border: none;
+    background-color: #2b2b2b;
+    height: 10px;
+    margin: 0px;
+}
+
+QScrollBar::handle:horizontal {
+    background-color: #444;
+    border-radius: 5px;
+    min-width: 20px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background-color: #555;
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0px;
 }

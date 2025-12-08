@@ -3,7 +3,12 @@
  <class>MainWindow</class>
  <widget class="QMainWindow" name="MainWindow">
   <property name="geometry">
-   <rect><x>0</x><y>0</y><width>1000</width><height>600</height></rect>
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1000</width>
+    <height>600</height>
+   </rect>
   </property>
   <property name="windowTitle">
    <string>Editor de Tráfico</string>
@@ -14,23 +19,56 @@
     <!-- Barra superior -->
     <item>
      <layout class="QHBoxLayout" name="toolbarLayout">
-      <item><widget class="QPushButton" name="mover_button"><property name="text"><string>Mover</string></property><property name="checkable"><bool>true</bool></property></widget></item>
-      <item><widget class="QPushButton" name="colocar_vertice_button"><property name="text"><string>Colocar vértice</string></property><property name="checkable"><bool>true</bool></property></widget></item>
-      <item><widget class="QPushButton" name="crear_ruta_button"><property name="text"><string>Crear ruta</string></property><property name="checkable"><bool>true</bool></property></widget></item>
+      <item>
+       <widget class="QPushButton" name="mover_button">
+        <property name="text">
+         <string>Mover</string>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="colocar_vertice_button">
+        <property name="text">
+         <string>Colocar vértice</string>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="crear_ruta_button">
+        <property name="text">
+         <string>Crear ruta</string>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
      </layout>
     </item>
 
     <!-- Splitter central -->
     <item>
      <widget class="QSplitter" name="splitter">
-      <property name="orientation"><enum>Qt::Horizontal</enum></property>
+      <property name="orientation">
+       <enum>Qt::Horizontal</enum>
+      </property>
 
       <!-- Panel izquierdo: área de trabajo -->
       <widget class="QScrollArea" name="scrollAreaWork">
-       <property name="widgetResizable"><bool>true</bool></property>
+       <property name="widgetResizable">
+        <bool>true</bool>
+       </property>
        <widget class="QWidget" name="scrollAreaWidgetContentsWork">
         <layout class="QVBoxLayout" name="workLayout">
-         <item><widget class="QGraphicsView" name="marco_trabajo"/></item>
+         <item>
+          <widget class="QGraphicsView" name="marco_trabajo"/>
+         </item>
         </layout>
        </widget>
       </widget>
@@ -42,49 +80,101 @@
         <!-- Sección Nodos -->
         <item>
          <widget class="QGroupBox" name="groupNodos">
-          <property name="title"><string>Nodos</string></property>
+          <property name="title">
+           <string>Nodos</string>
+          </property>
           <layout class="QVBoxLayout" name="nodosLayout">
+           <!-- Botones de visibilidad -->
+           <item>
+            <layout class="QHBoxLayout" name="visibilityButtonsLayout">
+             <item>
+              <widget class="QPushButton" name="btnOcultarTodo">
+               <property name="text">
+                <string>Ocultar todo</string>
+               </property>
+               <property name="minimumHeight">
+                <number>25</number>
+               </property>
+               <property name="maximumWidth">
+                <number>100</number>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="btnMostrarTodo">
+               <property name="text">
+                <string>Mostrar todo</string>
+               </property>
+               <property name="minimumHeight">
+                <number>25</number>
+               </property>
+               <property name="maximumWidth">
+                <number>100</number>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <!-- Fin botones de visibilidad -->
            <item>
             <widget class="QListWidget" name="nodosList"/>
            </item>
           </layout>
          </widget>
-         <property name="stretch"><number>1</number></property>
+         <property name="stretch">
+          <number>1</number>
+         </property>
         </item>
 
         <!-- Sección Rutas -->
         <item>
          <widget class="QGroupBox" name="groupRutas">
-          <property name="title"><string>Rutas</string></property>
+          <property name="title">
+           <string>Rutas</string>
+          </property>
           <layout class="QVBoxLayout" name="rutasLayout">
            <item>
             <widget class="QListWidget" name="rutasList"/>
            </item>
           </layout>
          </widget>
-         <property name="stretch"><number>1</number></property>
+         <property name="stretch">
+          <number>1</number>
+         </property>
         </item>
 
         <!-- Sección Propiedades -->
         <item>
          <widget class="QGroupBox" name="groupProperties">
-          <property name="title"><string>Propiedades</string></property>
+          <property name="title">
+           <string>Propiedades</string>
+          </property>
           <layout class="QVBoxLayout" name="propertiesContainer">
            <item>
             <widget class="QTableWidget" name="propertiesTable">
-                <property name="columnCount"><number>2</number></property>
-                <property name="rowCount"><number>0</number></property>
-                <column>
-                <property name="text"><string>Propiedad</string></property>
-                </column>
-                <column>
-                <property name="text"><string>Valor</string></property>
-                </column>
-                </widget>
+             <property name="columnCount">
+              <number>2</number>
+             </property>
+             <property name="rowCount">
+              <number>0</number>
+             </property>
+             <column>
+              <property name="text">
+               <string>Propiedad</string>
+              </property>
+             </column>
+             <column>
+              <property name="text">
+               <string>Valor</string>
+              </property>
+             </column>
+            </widget>
            </item>
           </layout>
          </widget>
-         <property name="stretch"><number>1</number></property>
+         <property name="stretch">
+          <number>1</number>
+         </property>
         </item>
 
        </layout>
@@ -97,8 +187,16 @@
 
   <!-- Menú y barra de estado -->
   <widget class="QMenuBar" name="menubar">
-   <widget class="QMenu" name="menuProyecto"><property name="title"><string>Proyecto</string></property></widget>
-   <widget class="QMenu" name="menuArchivo"><property name="title"><string>Archivo</string></property></widget>
+   <widget class="QMenu" name="menuProyecto">
+    <property name="title">
+     <string>Proyecto</string>
+    </property>
+   </widget>
+   <widget class="QMenu" name="menuArchivo">
+    <property name="title">
+     <string>Archivo</string>
+    </property>
+   </widget>
    <addaction name="menuProyecto"/>
    <addaction name="menuArchivo"/>
   </widget>
