@@ -4,7 +4,6 @@ from Model.Nodo import Nodo
 class Proyecto:
     def __init__(self, mapa=None, nodos=None, rutas=None):
         self.mapa = mapa
-        # Si no hay nodos/rutas, inicializar listas vacías
         self.nodos = nodos if nodos is not None else []
         self.rutas = rutas if rutas is not None else []
 
@@ -51,14 +50,78 @@ class Proyecto:
         return None
 
     def guardar(self, ruta_archivo):
-        """Guarda el proyecto en un archivo JSON."""
+        """Guarda el proyecto en un archivo JSON con nodos completos en rutas."""
+        # Preparar rutas con nodos completos
+        rutas_con_nodos_completos = []
+        for ruta in self.rutas:
+            try:
+                ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+            except Exception:
+                ruta_dict = ruta
+            
+            # Crear copia de la ruta con nodos completos
+            ruta_completa = {}
+            
+            # Origen completo
+            origen = ruta_dict.get("origen")
+            if origen:
+                # Si origen es solo un ID, buscar el nodo completo
+                if isinstance(origen, int):
+                    nodo_completo = next((n for n in self.nodos if n.get('id') == origen), None)
+                    if nodo_completo:
+                        ruta_completa["origen"] = nodo_completo.to_dict() if hasattr(nodo_completo, "to_dict") else nodo_completo
+                    else:
+                        ruta_completa["origen"] = {"id": origen, "X": 0, "Y": 0}
+                elif isinstance(origen, dict):
+                    # Si ya es un diccionario, usarlo tal cual
+                    ruta_completa["origen"] = origen
+                else:
+                    # Si es un objeto Nodo
+                    ruta_completa["origen"] = origen.to_dict() if hasattr(origen, "to_dict") else origen
+            
+            # Destino completo
+            destino = ruta_dict.get("destino")
+            if destino:
+                if isinstance(destino, int):
+                    nodo_completo = next((n for n in self.nodos if n.get('id') == destino), None)
+                    if nodo_completo:
+                        ruta_completa["destino"] = nodo_completo.to_dict() if hasattr(nodo_completo, "to_dict") else nodo_completo
+                    else:
+                        ruta_completa["destino"] = {"id": destino, "X": 0, "Y": 0}
+                elif isinstance(destino, dict):
+                    ruta_completa["destino"] = destino
+                else:
+                    ruta_completa["destino"] = destino.to_dict() if hasattr(destino, "to_dict") else destino
+            
+            # Visita completa
+            visita = ruta_dict.get("visita", [])
+            if visita:
+                visita_completa = []
+                for nodo_visita in visita:
+                    if isinstance(nodo_visita, int):
+                        nodo_completo = next((n for n in self.nodos if n.get('id') == nodo_visita), None)
+                        if nodo_completo:
+                            visita_completa.append(nodo_completo.to_dict() if hasattr(nodo_completo, "to_dict") else nodo_completo)
+                        else:
+                            visita_completa.append({"id": nodo_visita, "X": 0, "Y": 0})
+                    elif isinstance(nodo_visita, dict):
+                        visita_completa.append(nodo_visita)
+                    else:
+                        visita_completa.append(nodo_visita.to_dict() if hasattr(nodo_visita, "to_dict") else nodo_visita)
+                ruta_completa["visita"] = visita_completa
+            
+            rutas_con_nodos_completos.append(ruta_completa)
+        
         datos = {
             "mapa": self.mapa,
             "nodos": [n.to_dict() for n in self.nodos],
-            "rutas": self.rutas  
+            "rutas": rutas_con_nodos_completos  # Nodos completos
         }
+        
         with open(ruta_archivo, "w", encoding="utf-8") as f:
             json.dump(datos, f, indent=4, ensure_ascii=False)
+        
+        print(f"✓ Proyecto guardado con {len(rutas_con_nodos_completos)} rutas (nodos completos)")
 
     @classmethod
     def cargar(cls, ruta_archivo):
@@ -68,21 +131,71 @@ class Proyecto:
 
         mapa = datos.get("mapa", "")
         nodos_data = datos.get("nodos", [])
-        rutas = datos.get("rutas", [])
+        rutas_simplificadas = datos.get("rutas", [])
 
         # Convertir nodos del JSON en objetos Nodo
         nodos = [Nodo(nd) for nd in nodos_data]
-
-        return cls(mapa, nodos, rutas)
+        
+        # Crear diccionario de nodos por ID para búsqueda rápida
+        nodos_por_id = {nodo.get('id'): nodo for nodo in nodos}
+        
+        # Reconstruir rutas completas
+        rutas_completas = []
+        for ruta_simp in rutas_simplificadas:
+            ruta_completa = {}
+            
+            # Origen
+            origen = ruta_simp.get('origen')
+            if origen:
+                if isinstance(origen, dict) and 'id' in origen:
+                    # Si ya es un diccionario con nodo completo
+                    ruta_completa['origen'] = origen
+                elif isinstance(origen, int):
+                    # Si es solo un ID, buscar el nodo
+                    nodo_origen = nodos_por_id.get(origen)
+                    if nodo_origen:
+                        ruta_completa['origen'] = nodo_origen.to_dict() if hasattr(nodo_origen, "to_dict") else nodo_origen
+                    else:
+                        ruta_completa['origen'] = {"id": origen, "X": 0, "Y": 0}
+            
+            # Destino
+            destino = ruta_simp.get('destino')
+            if destino:
+                if isinstance(destino, dict) and 'id' in destino:
+                    ruta_completa['destino'] = destino
+                elif isinstance(destino, int):
+                    nodo_destino = nodos_por_id.get(destino)
+                    if nodo_destino:
+                        ruta_completa['destino'] = nodo_destino.to_dict() if hasattr(nodo_destino, "to_dict") else nodo_destino
+                    else:
+                        ruta_completa['destino'] = {"id": destino, "X": 0, "Y": 0}
+            
+            # Visita
+            visita = ruta_simp.get('visita', [])
+            if visita:
+                visita_completa = []
+                for item in visita:
+                    if isinstance(item, dict) and 'id' in item:
+                        visita_completa.append(item)
+                    elif isinstance(item, int):
+                        nodo_visita = nodos_por_id.get(item)
+                        if nodo_visita:
+                            visita_completa.append(nodo_visita.to_dict() if hasattr(nodo_visita, "to_dict") else nodo_visita)
+                        else:
+                            visita_completa.append({"id": item, "X": 0, "Y": 0})
+                ruta_completa['visita'] = visita_completa
+            
+            rutas_completas.append(ruta_completa)
+        
+        print(f"✓ Proyecto cargado: {len(nodos)} nodos, {len(rutas_completas)} rutas")
+        return cls(mapa, nodos, rutas_completas)
     
-   # En la clase Proyecto, modifica el método _update_routes_for_node:
     def _update_routes_for_node(self, nodo_id):
         """
-        Recorre proyecto.rutas y, cuando encuentre referencias al nodo por id,
-        actualiza los dicts origen/visita/destino con las coordenadas actuales del nodo.
+        Recorre proyecto.rutas y actualiza las referencias al nodo movido.
         """
         try:
-            # buscar nodo actual en proyecto.nodos
+            # Buscar nodo actual en proyecto.nodos
             nodo_actual = next((n for n in self.nodos if n.get("id") == nodo_id), None)
             if not nodo_actual:
                 return
@@ -114,7 +227,7 @@ class Proyecto:
                         changed = True
 
                 if changed:
-                    # si la ruta está almacenada por identidad en proyecto.rutas, actualizar referencia
+                    # Actualizar referencia en proyecto.rutas
                     try:
                         for i, r in enumerate(self.rutas):
                             try:
@@ -128,4 +241,3 @@ class Proyecto:
                         pass
         except Exception as err:
             print("Error en _update_routes_for_node:", err)
-

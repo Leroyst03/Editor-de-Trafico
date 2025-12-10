@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QPixmap, QPen, QColor
 from PyQt5.QtCore import Qt, QEvent, QObject, QSize
 from Model.Proyecto import Proyecto
+from Model.ExportadorDB import ExportadorDB
 from Controller.mover_controller import MoverController
 from Controller.colocar_controller import ColocarController
 from Controller.ruta_controller import RutaController
@@ -36,6 +37,11 @@ class EditorController(QObject):
         nuevo_action = self.view.menuProyecto.addAction("Nuevo")
         abrir_action = self.view.menuProyecto.addAction("Abrir")
         guardar_action = self.view.menuProyecto.addAction("Guardar")
+        
+        # --- NUEVO: Submenú Exportar ---
+        self.view.menuProyecto.addSeparator()  # Separador visual
+        exportar_action = self.view.menuProyecto.addAction("Exportar a SQLite...")
+        exportar_action.triggered.connect(self.exportar_a_sqlite)
 
         nuevo_action.triggered.connect(self.nuevo_proyecto)
         abrir_action.triggered.connect(self.abrir_proyecto)
@@ -706,6 +712,7 @@ class EditorController(QObject):
         if not ruta_archivo.lower().endswith(".json"):
             ruta_archivo += ".json"
         try:
+            # El método guardar() de Proyecto ahora guarda rutas simplificadas (solo IDs)
             self.proyecto.guardar(ruta_archivo)
             print("✓ Proyecto guardado en:", ruta_archivo)
         except Exception as err:
@@ -2211,18 +2218,22 @@ class EditorController(QObject):
                         it.setSelected(False)
                 except Exception:
                     pass
+                
                 # deseleccionar lista de nodos
                 try:
                     self.view.nodosList.clearSelection()
                 except Exception:
                     pass
+                
                 # deseleccionar lista de rutas y limpiar highlights
                 try:
                     if hasattr(self.view, "rutasList"):
                         self.view.rutasList.clearSelection()
                 except Exception:
                     pass
+                
                 self._clear_highlight_lines()
+                
                 # limpiar propertiesTable
                 try:
                     self.view.propertiesTable.clear()
@@ -2231,6 +2242,7 @@ class EditorController(QObject):
                     self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
                 except Exception:
                     pass
+                
                 # Restaurar colores de nodos
                 for item in self.scene.items():
                     if isinstance(item, NodoItem):
@@ -2608,3 +2620,42 @@ class EditorController(QObject):
         if 0 <= ruta_index < len(self.proyecto.rutas):
             return self.proyecto.rutas[ruta_index]
         return None
+
+    # --- NUEVO MÉTODO PARA EXPORTACIÓN SQLITE ---
+    
+    def exportar_a_sqlite(self):
+        """Exporta el proyecto actual a bases de datos SQLite separadas."""
+        if not self.proyecto:
+            QMessageBox.warning(
+                self.view,
+                "No hay proyecto",
+                "Debes crear o abrir un proyecto primero."
+            )
+            return
+        
+        # Verificar que hay datos para exportar
+        if not self.proyecto.nodos and not self.proyecto.rutas:
+            QMessageBox.warning(
+                self.view,
+                "Proyecto vacío",
+                "El proyecto no contiene nodos ni rutas para exportar."
+            )
+            return
+        
+        # Mostrar diálogo de confirmación
+        confirmacion = QMessageBox.question(
+            self.view,
+            "Confirmar exportación",
+            f"¿Exportar proyecto actual?\n\n"
+            f"• Nodos: {len(self.proyecto.nodos)}\n"
+            f"• Rutas: {len(self.proyecto.rutas)}\n\n"
+            f"Se crearán dos archivos:\n"
+            f"  - nodos.db (todos los atributos de nodos)\n"
+            f"  - rutas.db (IDs: origen, destino, visitados)",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        
+        if confirmacion == QMessageBox.Yes:
+            # Llamar al exportador
+            ExportadorDB.exportar(self.proyecto, self.view)

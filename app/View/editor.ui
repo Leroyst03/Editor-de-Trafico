@@ -185,20 +185,14 @@
    </layout>
   </widget>
 
-  <!-- Menú y barra de estado -->
+  <!-- Menú simplificado - Solo Proyecto -->
   <widget class="QMenuBar" name="menubar">
    <widget class="QMenu" name="menuProyecto">
     <property name="title">
      <string>Proyecto</string>
     </property>
    </widget>
-   <widget class="QMenu" name="menuArchivo">
-    <property name="title">
-     <string>Archivo</string>
-    </property>
-   </widget>
    <addaction name="menuProyecto"/>
-   <addaction name="menuArchivo"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
  </widget>
