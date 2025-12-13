@@ -42,10 +42,29 @@ class ColocarController(QObject):
                     except Exception:
                         pass
 
-                # Añadir a la lista lateral
-                item = QListWidgetItem(f"ID {nodo.get('id')} - ({nodo.get('X')}, {nodo.get('Y')})")
-                item.setData(Qt.UserRole, nodo)
-                self.view.nodosList.addItem(item)
+                # AÑADIR A LA LISTA LATERAL USANDO EL SISTEMA DEL EDITOR
+                print(f"DEBUG ColocarController: Agregando nodo ID {nodo.get('id')} a lista lateral")
+                
+                # Usar el método centralizado del editor para inicializar visibilidad
+                if hasattr(self.editor, '_inicializar_nodo_visibilidad'):
+                    try:
+                        self.editor._inicializar_nodo_visibilidad(nodo, agregar_a_lista=True)
+                        print(f"✓ Nodo {nodo.get('id')} agregado con widget de visibilidad")
+                    except Exception as e:
+                        print(f"✗ Error al inicializar visibilidad: {e}")
+                        # Fallback: agregar manualmente
+                        item = QListWidgetItem(f"ID {nodo.get('id')} - ({nodo.get('X')}, {nodo.get('Y')})")
+                        item.setData(Qt.UserRole, nodo)
+                        self.view.nodosList.addItem(item)
+                else:
+                    # Fallback si no existe el método
+                    item = QListWidgetItem(f"ID {nodo.get('id')} - ({nodo.get('X')}, {nodo.get('Y')})")
+                    item.setData(Qt.UserRole, nodo)
+                    self.view.nodosList.addItem(item)
+
+                # También llamar a actualizar rutas si existen
+                if hasattr(self.editor, '_dibujar_rutas'):
+                    self.editor._dibujar_rutas()
 
                 print(f"Nodo colocado en: ({nodo.get('X')}, {nodo.get('Y')})")
                 return True  # Consumimos el evento para que no se procese más

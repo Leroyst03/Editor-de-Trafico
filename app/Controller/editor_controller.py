@@ -117,6 +117,8 @@ class EditorController(QObject):
         if self.proyecto:
             self._actualizar_referencias_proyecto(self.proyecto)
             self.inicializar_visibilidad()
+            # Asegurar que los botones estén inicializados
+            self._actualizar_lista_nodos_con_widgets()
 
     # --- MÉTODOS NUEVOS PARA MANEJO DE PROYECTO ---
     
@@ -687,6 +689,9 @@ class EditorController(QObject):
                     except Exception:
                         pass
 
+                # Inicializar sistema de visibilidad para cada nodo
+                self._inicializar_nodo_visibilidad(nodo, agregar_a_lista=True)
+
             # Inicializar sistema de visibilidad
             self.inicializar_visibilidad()
             
@@ -773,34 +778,109 @@ class EditorController(QObject):
             print("No hay proyecto cargado")
             return
 
-        # Primero agregar al modelo
-        nodo = self.proyecto.agregar_nodo(x, y)
-
-        # Actualizar visibilidad
-        nodo_id = nodo.get('id')
-        if nodo_id is not None:
-            self.visibilidad_nodos[nodo_id] = True
-
-        # Crear NodoItem con referencia al editor usando helper centralizado
         try:
-            nodo_item = self._create_nodo_item(nodo)
-        except Exception:
-            nodo_item = NodoItem(nodo, editor=self)
+            print(f"DEBUG crear_nodo: Creando nodo en ({x}, {y})")
+            
+            # Primero agregar al modelo
+            nodo = self.proyecto.agregar_nodo(x, y)
+            print(f"DEBUG crear_nodo: Nodo creado con ID {nodo.get('id')}")
+
+            # Crear NodoItem con referencia al editor usando helper centralizado
             try:
-                nodo_item.setFlag(nodo_item.ItemIsSelectable, True)
-                nodo_item.setFlag(nodo_item.ItemIsFocusable, True)
-                nodo_item.setFlag(nodo_item.ItemIsMovable, (self.modo_actual == "mover"))
-                nodo_item.setAcceptedMouseButtons(Qt.LeftButton)
-                nodo_item.setZValue(1)
-                self.scene.addItem(nodo_item)
-                nodo_item.moved.connect(self.on_nodo_moved)
-            except Exception:
-                pass
+                nodo_item = self._create_nodo_item(nodo)
+            except Exception as e:
+                print(f"DEBUG crear_nodo: Error al crear NodoItem: {e}")
+                nodo_item = NodoItem(nodo, editor=self)
+                try:
+                    nodo_item.setFlag(nodo_item.ItemIsSelectable, True)
+                    nodo_item.setFlag(nodo_item.ItemIsFocusable, True)
+                    nodo_item.setFlag(nodo_item.ItemIsMovable, (self.modo_actual == "mover"))
+                    nodo_item.setAcceptedMouseButtons(Qt.LeftButton)
+                    nodo_item.setZValue(1)
+                    self.scene.addItem(nodo_item)
+                    nodo_item.moved.connect(self.on_nodo_moved)
+                except Exception as e2:
+                    print(f"DEBUG crear_nodo: Error al configurar NodoItem: {e2}")
 
-        # Actualizar lista de nodos con widgets
-        self._actualizar_lista_nodos_con_widgets()
+            # --- NUEVA FUNCIÓN PARA INICIALIZAR VISIBILIDAD ---
+            print(f"DEBUG crear_nodo: Llamando a _inicializar_nodo_visibilidad para nodo {nodo.get('id')}")
+            self._inicializar_nodo_visibilidad(nodo, agregar_a_lista=True)
+            
+            # Si hay rutas, actualizar todas las relaciones (para consistencia)
+            if hasattr(self.proyecto, 'rutas') and self.proyecto.rutas:
+                self._actualizar_todas_relaciones_nodo_ruta()
 
-        print("Nodo creado:", getattr(nodo, "to_dict", lambda: nodo)())
+            print(f"✓ Nodo ID {nodo.get('id')} creado con botón de visibilidad")
+            print("Nodo creado:", getattr(nodo, "to_dict", lambda: nodo)())
+        except Exception as e:
+            print(f"ERROR en crear_nodo: {e}")
+
+    # --- NUEVA FUNCIÓN CENTRALIZADA PARA INICIALIZAR VISIBILIDAD ---
+    def _inicializar_nodo_visibilidad(self, nodo, agregar_a_lista=True):
+        """
+        Inicializa completamente el sistema de visibilidad para un nodo.
+        Se usa tanto al crear nodos nuevos como al cargarlos desde archivo.
+        
+        Args:
+            nodo: El objeto nodo a inicializar
+            agregar_a_lista: Si True, agrega el nodo a la lista lateral con widget
+        """
+        try:
+            print(f"DEBUG _inicializar_nodo_visibilidad: nodo_id={nodo.get('id')}, agregar_a_lista={agregar_a_lista}")
+            nodo_id = nodo.get('id')
+            if nodo_id is None:
+                print("✗ Advertencia: Nodo sin ID en _inicializar_nodo_visibilidad")
+                return
+            
+            # 1. Inicializar visibilidad del nodo si no existe
+            if nodo_id not in self.visibilidad_nodos:
+                self.visibilidad_nodos[nodo_id] = True
+                print(f"  - Visibilidad inicializada para nodo {nodo_id}: True")
+            
+            # 2. Inicializar relaciones nodo-ruta si no existen
+            if nodo_id not in self.nodo_en_rutas:
+                self.nodo_en_rutas[nodo_id] = []
+            
+            # 3. Agregar a la lista lateral con widget de visibilidad
+            if agregar_a_lista:
+                x = nodo.get('X', 0)
+                y = nodo.get('Y', 0)
+                texto = f"ID {nodo_id} - ({x}, {y})"
+                
+                # Verificar si el nodo ya está en la lista
+                nodo_en_lista = False
+                for i in range(self.view.nodosList.count()):
+                    item = self.view.nodosList.item(i)
+                    widget = self.view.nodosList.itemWidget(item)
+                    if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo_id:
+                        nodo_en_lista = True
+                        # Actualizar el widget existente
+                        widget.lbl_texto.setText(texto)
+                        widget.set_visible(self.visibilidad_nodos.get(nodo_id, True))
+                        print(f"  - Nodo {nodo_id} ya existe en lista, widget actualizado")
+                        break
+                
+                # Si no está en la lista, agregarlo
+                if not nodo_en_lista:
+                    item = QListWidgetItem()
+                    item.setData(Qt.UserRole, nodo)
+                    item.setSizeHint(QSize(0, 24))
+                    
+                    widget = NodoListItemWidget(
+                        nodo_id, 
+                        texto, 
+                        self.visibilidad_nodos.get(nodo_id, True)
+                    )
+                    widget.toggle_visibilidad.connect(self.toggle_visibilidad_nodo)
+                    
+                    self.view.nodosList.addItem(item)
+                    self.view.nodosList.setItemWidget(item, widget)
+                    
+                    print(f"  ✓ Nodo {nodo_id} agregado a lista lateral con widget de visibilidad")
+            else:
+                print(f"  - Nodo {nodo_id} inicializado (sin agregar a lista)")
+        except Exception as e:
+            print(f"ERROR en _inicializar_nodo_visibilidad: {e}")
 
     # --- NUEVOS MÉTODOS PARA RESALTADO Y DETECCIÓN DE NODOS SUPERPUESTOS ---
     def resaltar_nodo_seleccionado(self, nodo_item):
@@ -2204,12 +2284,12 @@ class EditorController(QObject):
             # Mapear a escena
             pos = self.view.marco_trabajo.mapToScene(event.pos())
             
-            # PRIMERO: Si estamos en modo ruta, NO manejar el clic aquí
-            # El RutaController manejará los clics a través de su eventFilter
-            if self.modo_actual == "ruta":
-                return False  # Dejar que RutaController maneje el clic
+            # PRIMERO: Si estamos en modo ruta o modo colocar, NO manejar el clic aquí
+            # Los controladores respectivos manejarán los clics a través de su eventFilter
+            if self.modo_actual in ["ruta", "colocar"]:
+                return False  # Dejar que el controlador respectivo maneje el clic
             
-            # SEGUNDO: Comportamiento normal (solo si NO estamos en modo ruta)
+            # SEGUNDO: Comportamiento normal (solo si NO estamos en modo ruta o colocar)
             items = self.scene.items(pos)
             if not any(isinstance(it, NodoItem) for it in items):
                 # deseleccionar items de la escena
@@ -2298,18 +2378,26 @@ class EditorController(QObject):
         if not self.proyecto:
             return
         
+        print("Inicializando sistema de visibilidad...")
+        
         # Inicializar visibilidad de nodos
         for nodo in self.proyecto.nodos:
             nodo_id = nodo.get('id')
             if nodo_id is not None:
                 self.visibilidad_nodos[nodo_id] = True
+                print(f"  - Nodo {nodo_id}: visibilidad inicializada")
         
         # Inicializar visibilidad de rutas
         for idx in range(len(self.proyecto.rutas)):
             self.visibilidad_rutas[idx] = True
+            print(f"  - Ruta {idx}: visibilidad inicializada")
             
         # Inicializar relaciones nodo-ruta
         self._actualizar_todas_relaciones_nodo_ruta()
+        
+        # Actualizar listas con widgets
+        self._actualizar_lista_nodos_con_widgets()
+        self._actualizar_lista_rutas_con_widgets()
         
         print("✓ Sistema de visibilidad inicializado")
     
@@ -2374,24 +2462,9 @@ class EditorController(QObject):
         self.view.nodosList.clear()
         
         for nodo in self.proyecto.nodos:
-            nodo_id = nodo.get('id')
-            x = nodo.get('X', 0)
-            y = nodo.get('Y', 0)
-            texto = f"ID {nodo_id} - ({x}, {y})"
-            
-            item = QListWidgetItem()
-            item.setData(Qt.UserRole, nodo)
-            item.setSizeHint(QSize(0, 24))  # Altura reducida a 24px
-            
-            widget = NodoListItemWidget(
-                nodo_id, 
-                texto, 
-                self.visibilidad_nodos.get(nodo_id, True)
-            )
-            widget.toggle_visibilidad.connect(self.toggle_visibilidad_nodo)
-            
-            self.view.nodosList.addItem(item)
-            self.view.nodosList.setItemWidget(item, widget)
+            self._inicializar_nodo_visibilidad(nodo, agregar_a_lista=True)
+        
+        print(f"✓ Lista de nodos actualizada con widgets ({self.view.nodosList.count()} nodos)")
     
     def _actualizar_lista_rutas_con_widgets(self):
         """Actualiza la lista de rutas con widgets personalizados"""
@@ -2431,6 +2504,8 @@ class EditorController(QObject):
             
             self.view.rutasList.addItem(item)
             self.view.rutasList.setItemWidget(item, widget)
+        
+        print(f"✓ Lista de rutas actualizada con widgets ({self.view.rutasList.count()} rutas)")
     
     def ocultar_todo(self):
         """Oculta todos los nodos y rutas de la interfaz"""
