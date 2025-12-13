@@ -2535,15 +2535,23 @@ class EditorController(QObject):
         self._actualizar_lista_nodos_con_widgets()
         self._actualizar_lista_rutas_con_widgets()
         
-        # Limpiar selección de rutas
+        # Deseleccionar cualquier ruta seleccionada
         if hasattr(self.view, "rutasList"):
             self.view.rutasList.clearSelection()
+        
+        # Resetear el índice de ruta seleccionada
+        self.ruta_actual_idx = None
         
         # Limpiar tabla de propiedades
         self.view.propertiesTable.clear()
         self.view.propertiesTable.setRowCount(0)
         self.view.propertiesTable.setColumnCount(2)
         self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
+        
+        # Restaurar colores normales de todos los nodos
+        for item in self.scene.items():
+            if isinstance(item, NodoItem):
+                item.set_normal_color()
         
         print("✓ Todos los elementos ocultados")
     
@@ -2649,6 +2657,21 @@ class EditorController(QObject):
         
         # Actualizar visualización de rutas
         self._dibujar_rutas()
+        
+        # Si la ruta que se está ocultando es la que está seleccionada, limpiar los highlights
+        if not nuevo_estado and self.ruta_actual_idx == ruta_index:
+            # Limpiar las líneas amarillas de resaltado
+            self._clear_highlight_lines()
+            
+            # Restaurar colores normales de los nodos
+            for nodo in nodos_ruta:
+                if isinstance(nodo, dict):
+                    nodo_id = nodo.get('id')
+                    if nodo_id is not None:
+                        for item in self.scene.items():
+                            if isinstance(item, NodoItem) and item.nodo.get('id') == nodo_id:
+                                item.set_normal_color()
+                                break
         
         # Actualizar widgets en las listas
         self._actualizar_widget_ruta_en_lista(ruta_index)
