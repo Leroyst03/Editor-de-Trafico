@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import QGraphicsObject, QMessageBox, QGraphicsItem
 from PyQt5.QtCore import QRectF, Qt, pyqtSignal, QPointF
-from PyQt5.QtGui import QBrush, QPainter, QPen, QColor
+from PyQt5.QtGui import QBrush, QPainter, QPen, QColor, QFont
 from Model.Nodo import Nodo
 
 class NodoItem(QGraphicsObject):
@@ -36,13 +36,39 @@ class NodoItem(QGraphicsObject):
         self._dragging = False
         self._posicion_inicial = None  # Para guardar posición al inicio del arrastre
 
-        # Colores configurables
-        self.color_normal = QColor(0, 120, 215)   # Azul por defecto
-        self.color_selected = QColor(0, 200, 0)   # Verde para selección
+        # Colores configurables según objetivo
+        self.color_in = QColor("darkGreen")        # Verde para IN
+        self.color_out = QColor("darkRed")       # Rojo para OUT
+        self.color_io = QColor("darkViolet")      # Amarillo para I/O
+        self.color_default = QColor(0, 120, 215) # Azul por defecto si no hay objetivo
+        
+        # Colores para estados especiales
+        self.color_selected = QColor(255, 255, 255)   # Blanco para selección (borde)
         self.color_route_selected = QColor(255, 165, 0)  # Naranja para nodos en ruta seleccionada
         
-        # Usar color normal inicialmente
-        self.current_color = self.color_normal
+        # Obtener objetivo del nodo
+        self.objetivo = self.nodo.get("objetivo", 0) if hasattr(self.nodo, "get") else getattr(self.nodo, "objetivo", 0)
+        
+        # Definir color de relleno según objetivo
+        if self.objetivo == 1:
+            self.fill_color = self.color_in
+            self.texto = "IN"
+            self.con_horquilla = False  # Sin horquilla para IN
+        elif self.objetivo == 2:
+            self.fill_color = self.color_out
+            self.texto = "OUT"
+            self.con_horquilla = False  # Sin horquilla para OUT
+        elif self.objetivo == 3:
+            self.fill_color = self.color_io
+            self.texto = "I/O"
+            self.con_horquilla = False  # Sin horquilla para I/O
+        else:
+            self.fill_color = self.color_default
+            self.texto = str(self.nodo.get('id', ''))
+            self.con_horquilla = True  # Con horquilla para nodos comunes
+        
+        # Color de borde normal
+        self.border_color = Qt.black
 
     def boundingRect(self):
         return QRectF(0, 0, self.size, self.size)
@@ -55,55 +81,70 @@ class NodoItem(QGraphicsObject):
         painter.rotate(360 - angle)
         painter.translate(-self.size / 2, -self.size / 2)
 
-        # Determinar el color a usar
-        brush_color = self.current_color
-        
-        # Dibujar círculo
-        painter.setBrush(QBrush(brush_color))
-        painter.setPen(QPen(Qt.black, 1))
+        # Dibujar círculo con color según objetivo
+        painter.setBrush(QBrush(self.fill_color))
+        painter.setPen(QPen(self.border_color, 2))
         painter.drawEllipse(self.boundingRect())
 
-        center_y = self.size / 2
+        # Si el nodo tiene horquilla (objetivo=0 o sin objetivo)
+        if self.con_horquilla:
+            center_y = self.size / 2
 
-        # Parámetros de las horquillas
-        fork_length = 10   # longitud de cada horquilla (hacia la izquierda)
-        fork_gap = 6       # separación entre las dos horquillas
-        offset_from_node = 1  # separación desde el borde izquierdo del nodo hasta el inicio de las horquillas
+            # Parámetros de las horquillas
+            fork_length = 15   # longitud de cada horquilla (hacia la izquierda)
+            fork_gap = 6       # separación entre las dos horquillas
+            offset_from_node = 1  # separación desde el borde izquierdo del nodo hasta el inicio de las horquillas
 
-        # Coordenadas: dibujamos a la izquierda del nodo
-        x_start = -offset_from_node
-        x_end = x_start - fork_length
+            # Coordenadas: dibujamos a la izquierda del nodo
+            x_start = -offset_from_node
+            x_end = x_start - fork_length
 
-        # Posiciones verticales de las dos líneas
-        y_top = center_y - fork_gap / 2
-        y_bottom = center_y + fork_gap / 2
+            # Posiciones verticales de las dos líneas
+            y_top = center_y - fork_gap / 2
+            y_bottom = center_y + fork_gap / 2
 
-        # Dibujar las dos horquillas
-        pen = QPen(Qt.black, 2, Qt.SolidLine, Qt.RoundCap)
-        painter.setPen(pen)
-        painter.drawLine(QPointF(x_start, y_top), QPointF(x_end, y_top))
-        painter.drawLine(QPointF(x_start, y_bottom), QPointF(x_end, y_bottom))
+            # Dibujar las dos horquillas
+            pen = QPen(Qt.black, 2, Qt.SolidLine, Qt.RoundCap)
+            painter.setPen(pen)
+            painter.drawLine(QPointF(x_start, y_top), QPointF(x_end, y_top))
+            painter.drawLine(QPointF(x_start, y_bottom), QPointF(x_end, y_bottom))
 
-        # Dibujar el ID en el centro
-        painter.setPen(QPen(Qt.white, 1))
-        node_id = str(self.nodo.get('id', ''))
-        painter.drawText(self.boundingRect(), Qt.AlignCenter, node_id)
+        # Configurar fuente para el texto
+        font = QFont()
+        font.setPointSize(8)
+        font.setBold(True)
+        painter.setFont(font)
+
+        # Dibujar el texto en el centro
+        if self.objetivo in [1, 2, 3]:  # Para IN, OUT, I/O usar color negro
+            painter.setPen(QPen(Qt.black, 1))
+        else:  # Para nodos comunes usar color blanco
+            painter.setPen(QPen(Qt.white, 1))
+            
+        text_rect = self.boundingRect()
+        painter.drawText(text_rect, Qt.AlignCenter, self.texto)
+
+        # Si está seleccionado, dibujar un borde adicional
+        if self.isSelected():
+            painter.setBrush(Qt.NoBrush)
+            painter.setPen(QPen(self.color_selected, 3))
+            painter.drawEllipse(self.boundingRect().adjusted(2, 2, -2, -2))
 
         painter.restore()
 
     def set_selected_color(self):
-        """Cambia al color de selección"""
-        self.current_color = self.color_selected
+        """Cambia al color de selección (borde blanco)"""
+        self.border_color = self.color_selected
         self.update()
 
     def set_route_selected_color(self):
-        """Cambia al color para nodos en ruta seleccionada"""
-        self.current_color = self.color_route_selected
+        """Cambia al color para nodos en ruta seleccionada (borde naranja)"""
+        self.border_color = self.color_route_selected
         self.update()
 
     def set_normal_color(self):
-        """Vuelve al color normal"""
-        self.current_color = self.color_normal
+        """Vuelve al color normal (borde negro)"""
+        self.border_color = Qt.black
         self.update()
 
     def actualizar_posicion(self):
@@ -114,6 +155,30 @@ class NodoItem(QGraphicsObject):
             self.setPos(x - self.size / 2, y - self.size / 2)
         except Exception:
             pass
+
+    def actualizar_objetivo(self):
+        """Actualiza el color y texto cuando cambia el campo objetivo"""
+        self.objetivo = self.nodo.get("objetivo", 0) if hasattr(self.nodo, "get") else getattr(self.nodo, "objetivo", 0)
+        
+        # Definir color de relleno y texto según objetivo
+        if self.objetivo == 1:
+            self.fill_color = self.color_in
+            self.texto = "IN"
+            self.con_horquilla = False  # Sin horquilla para IN
+        elif self.objetivo == 2:
+            self.fill_color = self.color_out
+            self.texto = "OUT"
+            self.con_horquilla = False  # Sin horquilla para OUT
+        elif self.objetivo == 3:
+            self.fill_color = self.color_io
+            self.texto = "I/O"
+            self.con_horquilla = False  # Sin horquilla para I/O
+        else:
+            self.fill_color = self.color_default
+            self.texto = str(self.nodo.get('id', ''))
+            self.con_horquilla = True  # Con horquilla para nodos comunes
+        
+        self.update()
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton and self.editor:

@@ -171,6 +171,7 @@ class ExportadorDB:
             
             # Extraer solo IDs de los nodos intermedios (visita)
             visitados_ids = []
+            visitados_ids.append(str(origen_id))
             for nodo_visita in visita:
                 if isinstance(nodo_visita, dict) and 'id' in nodo_visita:
                     visitados_ids.append(str(nodo_visita['id']))
@@ -179,7 +180,7 @@ class ExportadorDB:
                 else:
                     # Asumir que ya es un ID
                     visitados_ids.append(str(nodo_visita))
-            
+            visitados_ids.append(str(destino_id))
             # Convertir a string separado por comas
             visitados_str = ','.join(visitados_ids)
             

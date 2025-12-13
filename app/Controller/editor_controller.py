@@ -662,6 +662,14 @@ class EditorController(QObject):
             # Cargar proyecto
             self.proyecto = Proyecto.cargar(ruta_archivo)
             
+            # Asegurarse de que todos los nodos tengan campo "objetivo"
+            for nodo in self.proyecto.nodos:
+                if isinstance(nodo, dict):
+                    if "objetivo" not in nodo:
+                        nodo["objetivo"] = 0
+                elif not hasattr(nodo, "objetivo"):
+                    setattr(nodo, "objetivo", 0)
+            
             # Usar el mismo método para actualizar referencias
             self._actualizar_referencias_proyecto(self.proyecto)
             
@@ -735,7 +743,7 @@ class EditorController(QObject):
         self.scene.addItem(pm_item)
 
     # --- Helper centralizado para crear NodoItem ---
-    def _create_nodo_item(self, nodo, size=20):
+    def _create_nodo_item(self, nodo, size=30):
         """
         Crea (o recupera) un NodoItem visual para el nodo del modelo,
         lo configura (flags, z-order), conecta la señal moved y lo añade a la escena.
@@ -745,6 +753,18 @@ class EditorController(QObject):
         for it in self.scene.items():
             if isinstance(it, NodoItem) and getattr(it, "nodo", None) == nodo:
                 return it
+
+        # Asegurar que el nodo tenga campo objetivo
+        if isinstance(nodo, dict):
+            if "objetivo" not in nodo:
+                nodo["objetivo"] = 0  # Valor por defecto
+        elif hasattr(nodo, "objetivo"):
+            pass  # Ya tiene el atributo
+        else:
+            try:
+                setattr(nodo, "objetivo", 0)  # Valor por defecto
+            except:
+                pass
 
         # Crear nuevo NodoItem
         nodo_item = NodoItem(nodo, size=size, editor=self)
@@ -784,6 +804,15 @@ class EditorController(QObject):
             # Primero agregar al modelo
             nodo = self.proyecto.agregar_nodo(x, y)
             print(f"DEBUG crear_nodo: Nodo creado con ID {nodo.get('id')}")
+
+            # Asegurar que el nodo tenga el campo "objetivo"
+            if isinstance(nodo, dict):
+                if "objetivo" not in nodo:
+                    nodo["objetivo"] = 0
+            elif hasattr(nodo, "objetivo"):
+                pass
+            else:
+                setattr(nodo, "objetivo", 0)
 
             # Crear NodoItem con referencia al editor usando helper centralizado
             try:
@@ -845,7 +874,19 @@ class EditorController(QObject):
             if agregar_a_lista:
                 x = nodo.get('X', 0)
                 y = nodo.get('Y', 0)
-                texto = f"ID {nodo_id} - ({x}, {y})"
+                objetivo = nodo.get('objetivo', 0)
+                
+                # Determinar texto según objetivo
+                if objetivo == 1:
+                    texto_objetivo = "IN"
+                elif objetivo == 2:
+                    texto_objetivo = "OUT"
+                elif objetivo == 3:
+                    texto_objetivo = "I/O"
+                else:
+                    texto_objetivo = "Sin objetivo"
+                
+                texto = f"ID {nodo_id} - {texto_objetivo} ({x}, {y})"
                 
                 # Verificar si el nodo ya está en la lista
                 nodo_en_lista = False
@@ -1139,7 +1180,9 @@ class EditorController(QObject):
         
         for nodo_item in nodos:
             nodo = nodo_item.nodo
-            action = menu.addAction(f"ID: {nodo.get('id')} - ({nodo.get('X')}, {nodo.get('Y')})")
+            objetivo = nodo.get('objetivo', 0)
+            texto_objetivo = "IN" if objetivo == 1 else "OUT" if objetivo == 2 else "I/O" if objetivo == 3 else "Sin objetivo"
+            action = menu.addAction(f"ID: {nodo.get('id')} - {texto_objetivo} ({nodo.get('X')}, {nodo.get('Y')})")
             action.triggered.connect(lambda checked, n=nodo: self.seleccionar_nodo_especifico(n))
         
         # Mostrar el menú en la posición del cursor
@@ -1187,7 +1230,19 @@ class EditorController(QObject):
             if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo_id:
                 x = nodo.get('X', 0)
                 y = nodo.get('Y', 0)
-                widget.lbl_texto.setText(f"ID {nodo_id} - ({x}, {y})")
+                objetivo = nodo.get('objetivo', 0)
+                
+                # Determinar texto según objetivo
+                if objetivo == 1:
+                    texto_objetivo = "IN"
+                elif objetivo == 2:
+                    texto_objetivo = "OUT"
+                elif objetivo == 3:
+                    texto_objetivo = "I/O"
+                else:
+                    texto_objetivo = "Sin objetivo"
+                
+                widget.lbl_texto.setText(f"ID {nodo_id} - {texto_objetivo} ({x}, {y})")
                 break
 
         # Refrescar el panel de propiedades si el nodo esta seleccionado
@@ -1633,6 +1688,121 @@ class EditorController(QObject):
                     pass
         except Exception as err:
             print("Error en actualizar_propiedades_valores:", err)
+
+    def _actualizar_propiedad_nodo(self, item):
+        """
+        Maneja cambios en propertiesTable para un nodo.
+        - Evita reentradas con self._updating_ui.
+        - Parsea el valor (ast.literal_eval cuando sea posible).
+        - Actualiza el modelo (nodo.update) y la UI.
+        """
+        if self._updating_ui or item.column() != 1:
+            return
+
+        try:
+            nodo, clave = item.data(Qt.UserRole)
+        except Exception:
+            return
+
+        texto = item.text()
+        try:
+            valor = ast.literal_eval(texto)
+        except Exception:
+            valor = texto
+
+        try:
+            # Actualizar el modelo
+            if hasattr(nodo, "update"):
+                nodo.update({clave: valor})
+            else:
+                try:
+                    setattr(nodo, clave, valor)
+                except Exception:
+                    pass
+            print(f"Nodo actualizado: {clave} = {valor}")
+        except Exception as err:
+            print("Error actualizando nodo en el modelo:", err)
+            return
+
+        # Si cambió el objetivo, actualizar el nodo visual
+        if clave == "objetivo":
+            try:
+                for scene_item in self.scene.items():
+                    if isinstance(scene_item, NodoItem) and getattr(scene_item, "nodo", None) == nodo:
+                        scene_item.actualizar_objetivo()
+                        break
+            except Exception as e:
+                print(f"Error actualizando objetivo: {e}")
+
+        # Si cambiaron coordenadas, actualizar la posición visual del NodoItem
+        if clave in ("X", "Y"):
+            try:
+                for scene_item in self.scene.items():
+                    if isinstance(scene_item, NodoItem) and getattr(scene_item, "nodo", None) == nodo:
+                        try:
+                            scene_item.actualizar_posicion()
+                        except Exception:
+                            try:
+                                x = int(nodo.get("X", 0)) if hasattr(nodo, "get") else int(getattr(nodo, "X", 0))
+                                y = int(nodo.get("Y", 0)) if hasattr(nodo, "get") else int(getattr(nodo, "Y", 0))
+                                scene_item.setPos(x - scene_item.size / 2, y - scene_item.size / 2)
+                            except Exception:
+                                pass
+                        break
+            except Exception:
+                pass
+
+            # Forzar actualización de líneas de rutas asociadas
+            try:
+                # Buscar el NodoItem correspondiente
+                for scene_item in self.scene.items():
+                    if isinstance(scene_item, NodoItem) and getattr(scene_item, "nodo", None) == nodo:
+                        self.on_nodo_moved(scene_item)
+                        break
+            except Exception:
+                try:
+                    self._dibujar_rutas()
+                except Exception:
+                    pass
+
+        # Actualizar texto en la lista lateral (si existe)
+        try:
+            for i in range(self.view.nodosList.count()):
+                li = self.view.nodosList.item(i)
+                widget = self.view.nodosList.itemWidget(li)
+                if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo.get('id'):
+                    x = nodo.get('X', 0)
+                    y = nodo.get('Y', 0)
+                    objetivo = nodo.get('objetivo', 0)
+                    
+                    # Determinar texto según objetivo
+                    if objetivo == 1:
+                        texto_objetivo = "IN"
+                    elif objetivo == 2:
+                        texto_objetivo = "OUT"
+                    elif objetivo == 3:
+                        texto_objetivo = "I/O"
+                    else:
+                        texto_objetivo = "Sin objetivo"
+                    
+                    widget.lbl_texto.setText(f"ID {nodo.get('id')} - {texto_objetivo} ({x}, {y})")
+                    break
+        except Exception:
+            pass
+
+        # Si la tabla de propiedades está mostrando este nodo, mantenerla sincronizada
+        try:
+            seleccionados = self.view.nodosList.selectedItems()
+            if seleccionados:
+                for i in range(self.view.nodosList.count()):
+                    item = self.view.nodosList.item(i)
+                    if item.isSelected():
+                        widget = self.view.nodosList.itemWidget(item)
+                        if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo.get('id'):
+                            self.actualizar_propiedades_valores(nodo, claves=("X", "Y"))
+                            break
+        except Exception:
+            pass
 
     # --- Eliminar nodo con reconfiguración de rutas ---
     def eliminar_nodo(self, nodo, nodo_item):
@@ -2179,99 +2349,6 @@ class EditorController(QObject):
         if hasattr(self.view, "rutasList") and self.view.rutasList.selectedItems():
             self.seleccionar_ruta_desde_lista()
 
-    def _actualizar_propiedad_nodo(self, item):
-        """
-        Maneja cambios en propertiesTable para un nodo.
-        - Evita reentradas con self._updating_ui.
-        - Parsea el valor (ast.literal_eval cuando sea posible).
-        - Actualiza el modelo (nodo.update) y la UI.
-        """
-        if self._updating_ui or item.column() != 1:
-            return
-
-        try:
-            nodo, clave = item.data(Qt.UserRole)
-        except Exception:
-            return
-
-        texto = item.text()
-        try:
-            valor = ast.literal_eval(texto)
-        except Exception:
-            valor = texto
-
-        try:
-            # Actualizar el modelo
-            if hasattr(nodo, "update"):
-                nodo.update({clave: valor})
-            else:
-                try:
-                    setattr(nodo, clave, valor)
-                except Exception:
-                    pass
-            print(f"Nodo actualizado: {clave} = {valor}")
-        except Exception as err:
-            print("Error actualizando nodo en el modelo:", err)
-            return
-
-        # Si cambiaron coordenadas, actualizar la posición visual del NodoItem
-        if clave in ("X", "Y"):
-            try:
-                for scene_item in self.scene.items():
-                    if isinstance(scene_item, NodoItem) and getattr(scene_item, "nodo", None) == nodo:
-                        try:
-                            scene_item.actualizar_posicion()
-                        except Exception:
-                            try:
-                                x = int(nodo.get("X", 0)) if hasattr(nodo, "get") else int(getattr(nodo, "X", 0))
-                                y = int(nodo.get("Y", 0)) if hasattr(nodo, "get") else int(getattr(nodo, "Y", 0))
-                                scene_item.setPos(x - scene_item.size / 2, y - scene_item.size / 2)
-                            except Exception:
-                                pass
-                        break
-            except Exception:
-                pass
-
-            # Forzar actualización de líneas de rutas asociadas
-            try:
-                # Buscar el NodoItem correspondiente
-                for scene_item in self.scene.items():
-                    if isinstance(scene_item, NodoItem) and getattr(scene_item, "nodo", None) == nodo:
-                        self.on_nodo_moved(scene_item)
-                        break
-            except Exception:
-                try:
-                    self._dibujar_rutas()
-                except Exception:
-                    pass
-
-        # Actualizar texto en la lista lateral (si existe)
-        try:
-            for i in range(self.view.nodosList.count()):
-                li = self.view.nodosList.item(i)
-                widget = self.view.nodosList.itemWidget(li)
-                if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo.get('id'):
-                    x = nodo.get('X', 0)
-                    y = nodo.get('Y', 0)
-                    widget.lbl_texto.setText(f"ID {nodo.get('id')} - ({x}, {y})")
-                    break
-        except Exception:
-            pass
-
-        # Si la tabla de propiedades está mostrando este nodo, mantenerla sincronizada
-        try:
-            seleccionados = self.view.nodosList.selectedItems()
-            if seleccionados:
-                for i in range(self.view.nodosList.count()):
-                    item = self.view.nodosList.item(i)
-                    if item.isSelected():
-                        widget = self.view.nodosList.itemWidget(item)
-                        if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo.get('id'):
-                            self.actualizar_propiedades_valores(nodo, claves=("X", "Y"))
-                            break
-        except Exception:
-            pass
-
     # --- Event filter para deselección al clicar en fondo ---
     def eventFilter(self, obj, event):
         # Detectar teclas presionadas
@@ -2347,11 +2424,14 @@ class EditorController(QObject):
                     nodo_id = nodo.get('id', "N/A")
                     x = nodo.get('X', "N/A")
                     y = nodo.get('Y', "N/A")
+                    objetivo = nodo.get('objetivo', "N/A")
                 else:
                     nodo_id = nodo.get('id', "N/A") if isinstance(nodo, dict) else "N/A"
                     x = nodo.get('X', "N/A") if isinstance(nodo, dict) else "N/A"
                     y = nodo.get('Y', "N/A") if isinstance(nodo, dict) else "N/A"
-                print(f"  Nodo {i}: ID {nodo_id} - ({x}, {y})")
+                    objetivo = nodo.get('objetivo', "N/A") if isinstance(nodo, dict) else "N/A"
+                texto_objetivo = "IN" if objetivo == 1 else "OUT" if objetivo == 2 else "I/O" if objetivo == 3 else "Sin objetivo"
+                print(f"  Nodo {i}: ID {nodo_id} - {texto_objetivo} ({x}, {y})")
             except Exception as e:
                 print(f"  Nodo {i}: ERROR - {e}")
         
