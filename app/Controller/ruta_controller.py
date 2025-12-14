@@ -77,10 +77,17 @@ class RutaController(QObject):
 
     # --- Métodos de la versión anterior que funcionaban ---
     def _create_and_add_node(self, x, y):
-        """Crea un nuevo nodo y lo añade a la ruta (como en versión anterior)"""
+        """Crea un nuevo nodo y lo añade a la ruta (CORREGIDO para incluir botón de visibilidad)"""
         # Crear el nodo en el modelo
         nodo = self.proyecto.agregar_nodo(x, y)
-
+        
+        # Asegurar que el nodo tenga campo "objetivo"
+        if isinstance(nodo, dict):
+            if "objetivo" not in nodo:
+                nodo["objetivo"] = 0
+        elif not hasattr(nodo, "objetivo"):
+            setattr(nodo, "objetivo", 0)
+        
         # Crear visual mediante helper del editor
         try:
             nodo_item = self.editor._create_nodo_item(nodo)
@@ -93,22 +100,42 @@ class RutaController(QObject):
             except Exception:
                 pass
 
-        # Añadir a la lista lateral
-        item = QListWidgetItem(f"ID {nodo.get('id')} - ({nodo.get('X')}, {nodo.get('Y')})")
-        item.setData(Qt.UserRole, nodo)
-        self.view.nodosList.addItem(item)
-
+        # --- CORRECCIÓN CRÍTICA: Usar el método del editor para inicializar visibilidad ---
+        print(f"DEBUG RutaController: Inicializando visibilidad para nodo nuevo {nodo.get('id')}")
+        self.editor._inicializar_nodo_visibilidad(nodo, agregar_a_lista=True)
+        
         # Añadir a la secuencia de la ruta y dibujar segmento si hay anterior
         self._append_node_to_route(nodo, nodo_item)
 
     def _add_existing_node(self, nodo_item):
-        """Añade un nodo existente a la ruta (como en versión anterior)"""
+        """Añade un nodo existente a la ruta (CORREGIDO para asegurar visibilidad)"""
         nodo = nodo_item.nodo
-        if nodo not in self.proyecto.nodos:
-            self.proyecto.nodos.append(nodo)
-            item = QListWidgetItem(f"ID {nodo.get('id')} - ({nodo.get('X')}, {nodo.get('Y')})")
-            item.setData(Qt.UserRole, nodo)
-            self.view.nodosList.addItem(item)
+        
+        # --- CORRECCIÓN: Asegurar que el nodo esté en la lista lateral con widget ---
+        # Verificar si el nodo ya está inicializado en el sistema de visibilidad
+        nodo_id = nodo.get('id')
+        
+        if nodo_id is not None:
+            # Verificar si el nodo ya está en el sistema de visibilidad del editor
+            if nodo_id not in self.editor.visibilidad_nodos:
+                print(f"DEBUG RutaController: Nodo existente {nodo_id} no tiene visibilidad, inicializando...")
+                self.editor._inicializar_nodo_visibilidad(nodo, agregar_a_lista=True)
+            else:
+                # El nodo ya está en el sistema, solo verificar que esté en la lista lateral
+                print(f"DEBUG RutaController: Nodo existente {nodo_id} ya tiene visibilidad")
+                
+                # Verificar si ya está en la lista lateral
+                en_lista = False
+                for i in range(self.view.nodosList.count()):
+                    item = self.view.nodosList.item(i)
+                    widget = self.view.nodosList.itemWidget(item)
+                    if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo_id:
+                        en_lista = True
+                        break
+                
+                if not en_lista:
+                    print(f"DEBUG RutaController: Nodo {nodo_id} no está en lista lateral, agregando...")
+                    self.editor._inicializar_nodo_visibilidad(nodo, agregar_a_lista=True)
         
         # Añadir a la secuencia de la ruta
         self._append_node_to_route(nodo, nodo_item)

@@ -888,7 +888,7 @@ class EditorController(QObject):
                 
                 texto = f"ID {nodo_id} - {texto_objetivo} ({x}, {y})"
                 
-                # Verificar si el nodo ya está en la lista
+                # Verificar si el nodo ya está en la lista (búsqueda exhaustiva)
                 nodo_en_lista = False
                 for i in range(self.view.nodosList.count()):
                     item = self.view.nodosList.item(i)
@@ -2374,36 +2374,36 @@ class EditorController(QObject):
                     for it in self.scene.selectedItems():
                         it.setSelected(False)
                 except Exception:
-                    pass
-                
-                # deseleccionar lista de nodos
+                        pass
+                    
+                    # deseleccionar lista de nodos
                 try:
-                    self.view.nodosList.clearSelection()
+                        self.view.nodosList.clearSelection()
                 except Exception:
-                    pass
-                
-                # deseleccionar lista de rutas y limpiar highlights
+                        pass
+                    
+                    # deseleccionar lista de rutas y limpiar highlights
                 try:
-                    if hasattr(self.view, "rutasList"):
-                        self.view.rutasList.clearSelection()
+                        if hasattr(self.view, "rutasList"):
+                            self.view.rutasList.clearSelection()
                 except Exception:
-                    pass
-                
+                        pass
+                    
                 self._clear_highlight_lines()
-                
-                # limpiar propertiesTable
+                    
+                    # limpiar propertiesTable
                 try:
-                    self.view.propertiesTable.clear()
-                    self.view.propertiesTable.setRowCount(0)
-                    self.view.propertiesTable.setColumnCount(2)
-                    self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
+                        self.view.propertiesTable.clear()
+                        self.view.propertiesTable.setRowCount(0)
+                        self.view.propertiesTable.setColumnCount(2)
+                        self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
                 except Exception:
-                    pass
-                
-                # Restaurar colores de nodos
+                        pass
+                    
+                    # Restaurar colores de nodos
                 for item in self.scene.items():
-                    if isinstance(item, NodoItem):
-                        item.set_normal_color()
+                        if isinstance(item, NodoItem):
+                            item.set_normal_color()
         return False
 
     def diagnosticar_estado_proyecto(self):
