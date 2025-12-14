@@ -60,7 +60,10 @@ class RutaController(QObject):
         if obj is self.view.marco_trabajo.viewport() and event.type() == QEvent.MouseButtonPress:
             if event.button() == Qt.LeftButton and self.proyecto and self.activo:
                 scene_pos = self.view.marco_trabajo.mapToScene(event.pos())
-                print(f"✓ Clic en mapa - Posición: ({scene_pos.x()}, {scene_pos.y()})")
+                # Mostrar en metros
+                x_m = self.editor.pixeles_a_metros(scene_pos.x())
+                y_m = self.editor.pixeles_a_metros(scene_pos.y())
+                print(f"✓ Clic en mapa - Posición: ({x_m:.2f}, {y_m:.2f}) metros")
                 
                 # itemAt recibe coordenadas del viewport
                 item = self.view.marco_trabajo.itemAt(event.pos())
@@ -70,7 +73,7 @@ class RutaController(QObject):
                     self._add_existing_node(item)
                 else:
                     # Crear nuevo nodo en la posición del clic
-                    print(f"✓ Creando nuevo nodo en posición ({int(scene_pos.x())}, {int(scene_pos.y())})")
+                    print(f"✓ Creando nuevo nodo en posición ({x_m:.2f}, {y_m:.2f}) metros")
                     self._create_and_add_node(int(scene_pos.x()), int(scene_pos.y()))
                 return True
         return False
@@ -257,7 +260,13 @@ class RutaController(QObject):
             self.proyecto.rutas = []
         self.proyecto.rutas.append(ruta_dict)
 
-        print(f"✓ Ruta guardada: Origen {origen.get('id')} -> Destino {destino.get('id')}")
+        # Mostrar coordenadas en metros
+        x_origen_m = self.editor.pixeles_a_metros(origen.get('X', 0))
+        y_origen_m = self.editor.pixeles_a_metros(origen.get('Y', 0))
+        x_destino_m = self.editor.pixeles_a_metros(destino.get('X', 0))
+        y_destino_m = self.editor.pixeles_a_metros(destino.get('Y', 0))
+        
+        print(f"✓ Ruta guardada: Origen {origen.get('id')} ({x_origen_m:.2f}, {y_origen_m:.2f}) -> Destino {destino.get('id')} ({x_destino_m:.2f}, {y_destino_m:.2f})")
 
         # Limpiar líneas temporales y estado de construcción
         self._clear_temp_lines()

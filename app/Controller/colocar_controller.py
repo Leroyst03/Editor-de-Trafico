@@ -53,12 +53,18 @@ class ColocarController(QObject):
                     except Exception as e:
                         print(f"✗ Error al inicializar visibilidad: {e}")
                         # Fallback: agregar manualmente
-                        item = QListWidgetItem(f"ID {nodo.get('id')} - ({nodo.get('X')}, {nodo.get('Y')})")
+                        # Mostrar en metros
+                        x_m = self.editor.pixeles_a_metros(nodo.get('X', 0))
+                        y_m = self.editor.pixeles_a_metros(nodo.get('Y', 0))
+                        item = QListWidgetItem(f"ID {nodo.get('id')} - ({x_m:.2f}, {y_m:.2f})")
                         item.setData(Qt.UserRole, nodo)
                         self.view.nodosList.addItem(item)
                 else:
                     # Fallback si no existe el método
-                    item = QListWidgetItem(f"ID {nodo.get('id')} - ({nodo.get('X')}, {nodo.get('Y')})")
+                    # Mostrar en metros
+                    x_m = self.editor.pixeles_a_metros(nodo.get('X', 0))
+                    y_m = self.editor.pixeles_a_metros(nodo.get('Y', 0))
+                    item = QListWidgetItem(f"ID {nodo.get('id')} - ({x_m:.2f}, {y_m:.2f})")
                     item.setData(Qt.UserRole, nodo)
                     self.view.nodosList.addItem(item)
 
@@ -66,7 +72,10 @@ class ColocarController(QObject):
                 if hasattr(self.editor, '_dibujar_rutas'):
                     self.editor._dibujar_rutas()
 
-                print(f"Nodo colocado en: ({nodo.get('X')}, {nodo.get('Y')})")
+                # Mostrar en metros
+                x_m = self.editor.pixeles_a_metros(nodo.get('X'))
+                y_m = self.editor.pixeles_a_metros(nodo.get('Y'))
+                print(f"Nodo colocado en: ({x_m:.2f}, {y_m:.2f}) metros")
                 return True  # Consumimos el evento para que no se procese más
 
         return False  # Dejar pasar otros eventos normalmente

@@ -19,6 +19,9 @@ class EditorController(QObject):
         super().__init__()
         self.view = view
         self.proyecto = proyecto
+        
+        # --- ESCALA GLOBAL: 1 píxel = 0.05 metros ---
+        self.ESCALA = 0.05
 
         # --- Inicializar escena con padre ---
         self.scene = QGraphicsScene(self.view.marco_trabajo)
@@ -119,6 +122,21 @@ class EditorController(QObject):
             self.inicializar_visibilidad()
             # Asegurar que los botones estén inicializados
             self._actualizar_lista_nodos_con_widgets()
+
+    # --- MÉTODOS DE CONVERSIÓN PÍXELES-METROS ---
+    def pixeles_a_metros(self, valor_px):
+        """Convierte píxeles a metros usando la escala global."""
+        return valor_px * self.ESCALA
+    
+    def metros_a_pixeles(self, valor_m):
+        """Convierte metros a píxeles usando la escala global."""
+        return valor_m / self.ESCALA
+    
+    def format_coords_m(self, x_px, y_px):
+        """Formatea coordenadas en metros con 2 decimales."""
+        x_m = self.pixeles_a_metros(x_px)
+        y_m = self.pixeles_a_metros(y_px)
+        return f"{x_m:.2f}, {y_m:.2f}"
 
     # --- MÉTODOS NUEVOS PARA MANEJO DE PROYECTO ---
     
@@ -507,7 +525,12 @@ class EditorController(QObject):
             # Mover puntero a la última posición
             self.indice_historial = len(self.historial_movimientos) - 1
             
-            print(f"Movimiento registrado: Nodo {nodo_id} de ({x_inicial},{y_inicial}) a ({x_final},{y_final})")
+            # Mostrar en metros
+            x_inicial_m = self.pixeles_a_metros(x_inicial)
+            y_inicial_m = self.pixeles_a_metros(y_inicial)
+            x_final_m = self.pixeles_a_metros(x_final)
+            y_final_m = self.pixeles_a_metros(y_final)
+            print(f"Movimiento registrado: Nodo {nodo_id} de ({x_inicial_m:.2f},{y_inicial_m:.2f}) a ({x_final_m:.2f},{y_final_m:.2f}) metros")
             
         except Exception as e:
             print(f"Error registrando movimiento finalizado: {e}")
@@ -527,7 +550,10 @@ class EditorController(QObject):
             x_anterior = movimiento['x_anterior']
             y_anterior = movimiento['y_anterior']
             
-            print(f"Deshaciendo movimiento: Nodo {nodo_id} a ({x_anterior},{y_anterior})")
+            # Mostrar en metros
+            x_anterior_m = self.pixeles_a_metros(x_anterior)
+            y_anterior_m = self.pixeles_a_metros(y_anterior)
+            print(f"Deshaciendo movimiento: Nodo {nodo_id} a ({x_anterior_m:.2f},{y_anterior_m:.2f}) metros")
             
             # Buscar el nodo en la escena
             nodo_encontrado = False
@@ -581,7 +607,10 @@ class EditorController(QObject):
             x_nueva = movimiento['x_nueva']
             y_nueva = movimiento['y_nueva']
             
-            print(f"Rehaciendo movimiento: Nodo {nodo_id} a ({x_nueva},{y_nueva})")
+            # Mostrar en metros
+            x_nueva_m = self.pixeles_a_metros(x_nueva)
+            y_nueva_m = self.pixeles_a_metros(y_nueva)
+            print(f"Rehaciendo movimiento: Nodo {nodo_id} a ({x_nueva_m:.2f},{y_nueva_m:.2f}) metros")
             
             # Buscar el nodo en la escena
             nodo_encontrado = False
@@ -799,7 +828,7 @@ class EditorController(QObject):
             return
 
         try:
-            print(f"DEBUG crear_nodo: Creando nodo en ({x}, {y})")
+            print(f"DEBUG crear_nodo: Creando nodo en ({x}, {y}) píxeles")
             
             # Primero agregar al modelo
             nodo = self.proyecto.agregar_nodo(x, y)
@@ -839,7 +868,10 @@ class EditorController(QObject):
             if hasattr(self.proyecto, 'rutas') and self.proyecto.rutas:
                 self._actualizar_todas_relaciones_nodo_ruta()
 
-            print(f"✓ Nodo ID {nodo.get('id')} creado con botón de visibilidad")
+            # Mostrar en metros
+            x_m = self.pixeles_a_metros(x)
+            y_m = self.pixeles_a_metros(y)
+            print(f"✓ Nodo ID {nodo.get('id')} creado con botón de visibilidad en ({x_m:.2f}, {y_m:.2f}) metros")
             print("Nodo creado:", getattr(nodo, "to_dict", lambda: nodo)())
         except Exception as e:
             print(f"ERROR en crear_nodo: {e}")
@@ -872,8 +904,11 @@ class EditorController(QObject):
             
             # 3. Agregar a la lista lateral con widget de visibilidad
             if agregar_a_lista:
-                x = nodo.get('X', 0)
-                y = nodo.get('Y', 0)
+                x_px = nodo.get('X', 0)
+                y_px = nodo.get('Y', 0)
+                # Convertir a metros
+                x_m = self.pixeles_a_metros(x_px)
+                y_m = self.pixeles_a_metros(y_px)
                 objetivo = nodo.get('objetivo', 0)
                 
                 # Determinar texto según objetivo
@@ -886,7 +921,8 @@ class EditorController(QObject):
                 else:
                     texto_objetivo = "Sin objetivo"
                 
-                texto = f"ID {nodo_id} - {texto_objetivo} ({x}, {y})"
+                # Mostrar coordenadas en metros con 2 decimales
+                texto = f"ID {nodo_id} - {texto_objetivo} ({x_m:.2f}, {y_m:.2f})"
                 
                 # Verificar si el nodo ya está en la lista (búsqueda exhaustiva)
                 nodo_en_lista = False
@@ -1182,7 +1218,14 @@ class EditorController(QObject):
             nodo = nodo_item.nodo
             objetivo = nodo.get('objetivo', 0)
             texto_objetivo = "IN" if objetivo == 1 else "OUT" if objetivo == 2 else "I/O" if objetivo == 3 else "Sin objetivo"
-            action = menu.addAction(f"ID: {nodo.get('id')} - {texto_objetivo} ({nodo.get('X')}, {nodo.get('Y')})")
+            
+            # Obtener coordenadas en metros
+            x_px = nodo.get('X', 0)
+            y_px = nodo.get('Y', 0)
+            x_m = self.pixeles_a_metros(x_px)
+            y_m = self.pixeles_a_metros(y_px)
+            
+            action = menu.addAction(f"ID: {nodo.get('id')} - {texto_objetivo} ({x_m:.2f}, {y_m:.2f})")
             action.triggered.connect(lambda checked, n=nodo: self.seleccionar_nodo_especifico(n))
         
         # Mostrar el menú en la posición del cursor
@@ -1222,14 +1265,17 @@ class EditorController(QObject):
             self._changing_selection = False
 
     def actualizar_lista_nodo(self, nodo):
-        """Actualizar la lista lateral del panel de propiedades con las coordenadas nuevas"""
+        """Actualizar la lista lateral del panel de propiedades con las coordenadas nuevas (en metros)"""
         nodo_id = nodo.get('id')
         for i in range(self.view.nodosList.count()):
             item = self.view.nodosList.item(i)
             widget = self.view.nodosList.itemWidget(item)
             if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo_id:
-                x = nodo.get('X', 0)
-                y = nodo.get('Y', 0)
+                x_px = nodo.get('X', 0)
+                y_px = nodo.get('Y', 0)
+                # Convertir a metros
+                x_m = self.pixeles_a_metros(x_px)
+                y_m = self.pixeles_a_metros(y_px)
                 objetivo = nodo.get('objetivo', 0)
                 
                 # Determinar texto según objetivo
@@ -1242,7 +1288,8 @@ class EditorController(QObject):
                 else:
                     texto_objetivo = "Sin objetivo"
                 
-                widget.lbl_texto.setText(f"ID {nodo_id} - {texto_objetivo} ({x}, {y})")
+                # Mostrar en metros con 2 decimales
+                widget.lbl_texto.setText(f"ID {nodo_id} - {texto_objetivo} ({x_m:.2f}, {y_m:.2f})")
                 break
 
         # Refrescar el panel de propiedades si el nodo esta seleccionado
@@ -1649,6 +1696,10 @@ class EditorController(QObject):
 
             for row, clave in enumerate(claves_filtradas):
                 valor = propiedades.get(clave)
+                
+                # Convertir X e Y a metros para mostrar
+                if clave in ["X", "Y"] and isinstance(valor, (int, float)):
+                    valor = self.pixeles_a_metros(valor)
 
                 key_item = QTableWidgetItem(clave)
                 key_item.setFlags(Qt.ItemIsEnabled)
@@ -1683,6 +1734,9 @@ class EditorController(QObject):
                             val = nodo.get(cell_clave) if hasattr(nodo, "get") else getattr(nodo, cell_clave, "")
                         except Exception:
                             val = getattr(nodo, cell_clave, "")
+                        # Convertir a metros para mostrar
+                        if cell_clave in ["X", "Y"]:
+                            val = self.pixeles_a_metros(val)
                         cell.setText(str(val))
                 except Exception:
                     pass
@@ -1711,6 +1765,16 @@ class EditorController(QObject):
             valor = texto
 
         try:
+            # Si la clave es X o Y, convertir de metros a píxeles
+            if clave in ["X", "Y"]:
+                # Asumimos que el usuario introduce metros
+                try:
+                    valor_metros = float(valor)
+                    valor = self.metros_a_pixeles(valor_metros)
+                except ValueError:
+                    print(f"Error: Valor de {clave} debe ser un número")
+                    return
+
             # Actualizar el modelo
             if hasattr(nodo, "update"):
                 nodo.update({clave: valor})
@@ -1771,8 +1835,11 @@ class EditorController(QObject):
                 li = self.view.nodosList.item(i)
                 widget = self.view.nodosList.itemWidget(li)
                 if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo.get('id'):
-                    x = nodo.get('X', 0)
-                    y = nodo.get('Y', 0)
+                    x_px = nodo.get('X', 0)
+                    y_px = nodo.get('Y', 0)
+                    # Convertir a metros para mostrar
+                    x_m = self.pixeles_a_metros(x_px)
+                    y_m = self.pixeles_a_metros(y_px)
                     objetivo = nodo.get('objetivo', 0)
                     
                     # Determinar texto según objetivo
@@ -1785,7 +1852,7 @@ class EditorController(QObject):
                     else:
                         texto_objetivo = "Sin objetivo"
                     
-                    widget.lbl_texto.setText(f"ID {nodo.get('id')} - {texto_objetivo} ({x}, {y})")
+                    widget.lbl_texto.setText(f"ID {nodo.get('id')} - {texto_objetivo} ({x_m:.2f}, {y_m:.2f})")
                     break
         except Exception:
             pass
@@ -2422,16 +2489,25 @@ class EditorController(QObject):
                 # Usar nodo.get() para objetos Nodo
                 if hasattr(nodo, 'get'):
                     nodo_id = nodo.get('id', "N/A")
-                    x = nodo.get('X', "N/A")
-                    y = nodo.get('Y', "N/A")
+                    x_px = nodo.get('X', "N/A")
+                    y_px = nodo.get('Y', "N/A")
                     objetivo = nodo.get('objetivo', "N/A")
                 else:
                     nodo_id = nodo.get('id', "N/A") if isinstance(nodo, dict) else "N/A"
-                    x = nodo.get('X', "N/A") if isinstance(nodo, dict) else "N/A"
-                    y = nodo.get('Y', "N/A") if isinstance(nodo, dict) else "N/A"
+                    x_px = nodo.get('X', "N/A") if isinstance(nodo, dict) else "N/A"
+                    y_px = nodo.get('Y', "N/A") if isinstance(nodo, dict) else "N/A"
                     objetivo = nodo.get('objetivo', "N/A") if isinstance(nodo, dict) else "N/A"
+                
+                # Convertir a metros para mostrar
+                if isinstance(x_px, (int, float)) and isinstance(y_px, (int, float)):
+                    x_m = self.pixeles_a_metros(x_px)
+                    y_m = self.pixeles_a_metros(y_px)
+                    coords_text = f"({x_m:.2f}, {y_m:.2f}) metros"
+                else:
+                    coords_text = f"({x_px}, {y_px}) píxeles"
+                
                 texto_objetivo = "IN" if objetivo == 1 else "OUT" if objetivo == 2 else "I/O" if objetivo == 3 else "Sin objetivo"
-                print(f"  Nodo {i}: ID {nodo_id} - {texto_objetivo} ({x}, {y})")
+                print(f"  Nodo {i}: ID {nodo_id} - {texto_objetivo} {coords_text}")
             except Exception as e:
                 print(f"  Nodo {i}: ERROR - {e}")
         
@@ -2829,11 +2905,12 @@ class EditorController(QObject):
             f"• Rutas: {len(self.proyecto.rutas)}\n\n"
             f"Se crearán dos archivos:\n"
             f"  - nodos.db (todos los atributos de nodos)\n"
-            f"  - rutas.db (IDs: origen, destino, visitados)",
+            f"  - rutas.db (IDs: origen, destino, visitados)\n\n"
+            f"Coordenadas exportadas en METROS (escala: {self.ESCALA})",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.Yes
         )
         
         if confirmacion == QMessageBox.Yes:
-            # Llamar al exportador
-            ExportadorDB.exportar(self.proyecto, self.view)
+            # Llamar al exportador pasando la escala
+            ExportadorDB.exportar(self.proyecto, self.view, self.ESCALA)
