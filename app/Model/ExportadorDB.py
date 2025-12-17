@@ -31,7 +31,7 @@ class ExportadorDB:
             conn_nodos = sqlite3.connect(ruta_nodos)
             cursor_nodos = conn_nodos.cursor()
             
-            # Crear tabla de nodos
+            # Crear tabla de nodos con TODOS los campos del modelo
             cursor_nodos.execute("""
                 CREATE TABLE IF NOT EXISTS nodos (
                     id INTEGER PRIMARY KEY,
@@ -39,15 +39,19 @@ class ExportadorDB:
                     Y REAL,   -- en metros
                     objetivo INTEGER,
                     A REAL,
-                    B REAL,
-                    C REAL,
-                    D REAL,
-                    E REAL,
-                    F REAL,
-                    G REAL,
-                    H REAL,
-                    I REAL,
-                    J REAL
+                    Vmax REAL,
+                    Seguridad REAL,
+                    Seg_alto REAL,
+                    Seg_tresD REAL,
+                    Tipo_curva INTEGER,
+                    Reloc INTEGER,
+                    decision INTEGER,
+                    timeout INTEGER,
+                    ultimo_metro INTEGER,
+                    es_cargador INTEGER,
+                    Puerta_Abrir INTEGER,
+                    Puerta_Cerrar INTEGER,
+                    Punto_espera INTEGER
                 )
             """)
             
@@ -66,23 +70,31 @@ class ExportadorDB:
                 y_m = y_px * escala
                 
                 cursor_nodos.execute("""
-                    INSERT INTO nodos (id, X, Y, objetivo, A, B, C, D, E, F, G, H, I, J)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO nodos (id, X, Y, objetivo, A, Vmax, Seguridad, 
+                                     Seg_alto, Seg_tresD, Tipo_curva, Reloc, 
+                                     decision, timeout, ultimo_metro, 
+                                     es_cargador, Puerta_Abrir, Puerta_Cerrar, 
+                                     Punto_espera)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     datos.get('id'),
                     x_m,  # X en metros
                     y_m,  # Y en metros
                     datos.get('objetivo', 0),
                     datos.get('A', 0),
-                    datos.get('B', 0),
-                    datos.get('C', 0),
-                    datos.get('D', 0),
-                    datos.get('E', 0),
-                    datos.get('F', 0),
-                    datos.get('G', 0),
-                    datos.get('H', 0),
-                    datos.get('I', 0),
-                    datos.get('J', 0)
+                    datos.get('Vmax', 0),
+                    datos.get('Seguridad', 0),
+                    datos.get('Seg_alto', 0),
+                    datos.get('Seg_tresD', 0),
+                    datos.get('Tipo_curva', 0),
+                    datos.get('Reloc', 0),
+                    datos.get('decision', 0),
+                    datos.get('timeout', 0),
+                    datos.get('ultimo_metro', 0),
+                    datos.get('es_cargador', 0),
+                    datos.get('Puerta_Abrir', 0),
+                    datos.get('Puerta_Cerrar', 0),
+                    datos.get('Punto_espera', 0)
                 ))
             
             conn_nodos.commit()
@@ -119,13 +131,18 @@ class ExportadorDB:
                 
                 # Convertir lista de visitas a string separado por comas
                 visitados_ids = []
-                visitados_ids.append(str(origen_id))
+                if origen_id is not None:
+                    visitados_ids.append(str(origen_id))
+                
                 for v in visita:
                     if isinstance(v, dict):
                         visitados_ids.append(str(v.get('id', '')))
                     else:
                         visitados_ids.append(str(v))
-                visitados_ids.append(str(destino_id))
+                
+                if destino_id is not None:
+                    visitados_ids.append(str(destino_id))
+                
                 visitados_str = ','.join(visitados_ids)
                 
                 cursor_rutas.execute("""

@@ -22,7 +22,7 @@
       <item>
        <widget class="QPushButton" name="mover_button">
         <property name="text">
-         <string>Mover</string>
+         <string>Mover vértice</string>
         </property>
         <property name="checkable">
          <bool>true</bool>
