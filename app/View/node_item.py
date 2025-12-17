@@ -13,7 +13,7 @@ class NodoItem(QGraphicsObject):
         self.size = size
         self.editor = editor
 
-        # Enviar cambios de geometría para que itemChange reciba ItemPositionHasChanged
+        # Enviar cambios de geometría para que itemChange recibe ItemPositionHasChanged
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
 
         # Posicionar el item según el modelo; centrar el item en la coordenada del modelo
@@ -30,7 +30,7 @@ class NodoItem(QGraphicsObject):
         self.setFlag(QGraphicsObject.ItemIsFocusable, True)
         # ItemIsMovable se activa/desactiva desde EditorController según el modo
         self.setAcceptedMouseButtons(Qt.LeftButton)
-        self.setZValue(1)
+        self.setZValue(1)  # Valor por defecto
 
         # Estado interno para detectar arrastre
         self._dragging = False
@@ -131,6 +131,18 @@ class NodoItem(QGraphicsObject):
             painter.drawEllipse(self.boundingRect().adjusted(2, 2, -2, -2))
 
         painter.restore()
+
+    # --- NUEVO MÉTODO PARA TRAER NODO AL FRENTE ---
+    def traer_al_frente(self):
+        """Establece el nodo con z-value alto para que aparezca encima de todos"""
+        self.setZValue(1000)  # Valor muy alto para asegurar que esté encima
+        self.update()
+
+    # --- NUEVO MÉTODO PARA RESTAURAR Z-VALUE NORMAL ---
+    def restaurar_zvalue_normal(self):
+        """Restaura el nodo al z-value normal (para cuando se deselecciona)"""
+        self.setZValue(1)  # Valor normal
+        self.update()
 
     def set_selected_color(self):
         """Cambia al color de selección (borde blanco)"""

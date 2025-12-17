@@ -123,20 +123,29 @@ class EditorController(QObject):
             # Asegurar que los botones estén inicializados
             self._actualizar_lista_nodos_con_widgets()
 
-    # --- MÉTODOS DE CONVERSIÓN PÍXELES-METROS ---
-    def pixeles_a_metros(self, valor_px):
-        """Convierte píxeles a metros usando la escala global."""
-        return valor_px * self.ESCALA
-    
-    def metros_a_pixeles(self, valor_m):
-        """Convierte metros a píxeles usando la escala global."""
-        return valor_m / self.ESCALA
-    
-    def format_coords_m(self, x_px, y_px):
-        """Formatea coordenadas en metros con 2 decimales."""
-        x_m = self.pixeles_a_metros(x_px)
-        y_m = self.pixeles_a_metros(y_px)
-        return f"{x_m:.2f}, {y_m:.2f}"
+    # --- MÉTODO NUEVO PARA AJUSTAR Z-VALUE DE NODOS AL SELECCIONAR ---
+    def _ajustar_zvalue_al_seleccionar_nodo(self, nodo_item_seleccionado):
+        """
+        Ajusta el z-value del nodo seleccionado para que aparezca encima de todos.
+        No importa si los demás nodos vuelven a z-value 1.
+        """
+        try:
+            # Restaurar todos los nodos a z-value normal (1)
+            for item in self.scene.items():
+                if isinstance(item, NodoItem):
+                    try:
+                        item.restaurar_zvalue_normal()  # Usar el nuevo método
+                    except Exception:
+                        item.setZValue(1)  # Fallback si no existe el método
+            
+            # Establecer el nodo seleccionado con z-value alto
+            try:
+                nodo_item_seleccionado.traer_al_frente()  # Usar el nuevo método
+            except Exception:
+                nodo_item_seleccionado.setZValue(1000)  # Fallback si no existe el método
+                
+        except Exception as e:
+            print(f"Error ajustando z-value: {e}")
 
     # --- MÉTODOS NUEVOS PARA MANEJO DE PROYECTO ---
     
@@ -1140,6 +1149,8 @@ class EditorController(QObject):
                                     scene_item.setSelected(True)
                                     # Solo aplicar color de selección (no de ruta)
                                     scene_item.set_selected_color()
+                                    # --- NUEVO: TRAER NODO AL FRENTE ---
+                                    self._ajustar_zvalue_al_seleccionar_nodo(scene_item)
                                     self.view.marco_trabajo.centerOn(scene_item)
                                     self.mostrar_propiedades_nodo(nodo)
                                     break
@@ -1197,6 +1208,9 @@ class EditorController(QObject):
             # Resaltar el nodo seleccionado
             nodo_item.set_selected_color()
             
+            # --- NUEVO: TRAER NODO AL FRENTE ---
+            self._ajustar_zvalue_al_seleccionar_nodo(nodo_item)
+            
             # Sincronizar con la lista lateral
             nodo_id = nodo.get('id')
             for i in range(self.view.nodosList.count()):
@@ -1249,6 +1263,8 @@ class EditorController(QObject):
                 if isinstance(item, NodoItem) and item.nodo == nodo:
                     item.setSelected(True)
                     item.set_selected_color()
+                    # --- NUEVO: TRAER NODO AL FRENTE ---
+                    self._ajustar_zvalue_al_seleccionar_nodo(item)
                     self.view.marco_trabajo.centerOn(item)
                     break
             
@@ -1594,7 +1610,6 @@ class EditorController(QObject):
             print(f"Error en clear: {e}")
 
         if not getattr(self, "proyecto", None) or not hasattr(self.proyecto, "rutas"):
-            print("DEBUG: No hay proyecto o rutas para dibujar")
             return
 
         # REPARAR REFERENCIAS ANTES DE DIBUJAR
