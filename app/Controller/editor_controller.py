@@ -69,6 +69,8 @@ class EditorController(QObject):
         # Estado inicial: modo por defecto (navegación)
         self.view.marco_trabajo.setDragMode(self.view.marco_trabajo.ScrollHandDrag)
 
+        self.scene.selectionChanged.connect(self.manejar_seleccion_nodo)
+
         self._changing_selection = False
         self._updating_ui = False
 
@@ -1344,6 +1346,8 @@ class EditorController(QObject):
             for item in self.scene.items():
                 if isinstance(item, NodoItem):
                     item.set_normal_color()
+                    # Restaurar z-values normales
+                    item.setZValue(1)
             return
 
         # Guardar el índice de la ruta seleccionada
@@ -1359,10 +1363,11 @@ class EditorController(QObject):
         if self.ruta_actual_idx is None:
             return
 
-        # IMPORTANTE: Restaurar todos los nodos a color normal primero
+        # IMPORTANTE: Restaurar todos los nodos a color normal y z-value normal primero
         for item in self.scene.items():
             if isinstance(item, NodoItem):
                 item.set_normal_color()
+                item.setZValue(1)
 
         # Deseleccionar todos los nodos primero
         self._changing_selection = True
@@ -2914,3 +2919,281 @@ class EditorController(QObject):
         if confirmacion == QMessageBox.Yes:
             # Llamar al exportador pasando la escala
             ExportadorDB.exportar(self.proyecto, self.view, self.ESCALA)
+
+    def manejar_seleccion_nodo(self):
+        """Maneja la selección de nodos, ajustando z-values para nodos solapados"""
+        seleccionados = self.scene.selectedItems()
+        
+        # Primero, restaurar todos los nodos a su z-value normal
+        for item in self.scene.items():
+            if isinstance(item, NodoItem):
+                if not item.isSelected():
+                    item.setZValue(1)  # Valor z normal para nodos no seleccionados
+        
+        # Si hay nodos seleccionados, asegurarse de que estén encima
+        for item in seleccionados:
+            if isinstance(item, NodoItem):
+                # Establecer un valor z muy alto
+                item.setZValue(1000)
+                
+                # Verificar si hay nodos en la misma posición (solapados)
+                pos = item.scenePos()
+                rect = item.boundingRect().translated(pos)
+                
+                # Buscar nodos en la misma posición
+                nodos_solapados = []
+                for otro_item in self.scene.items():
+                    if isinstance(otro_item, NodoItem) and otro_item != item:
+                        otro_pos = otro_item.scenePos()
+                        # Verificar si están muy cerca (dentro de 5 píxeles)
+                        if (abs(otro_pos.x() - pos.x()) < 5 and 
+                            abs(otro_pos.y() - pos.y()) < 5):
+                            nodos_solapados.append(otro_item)
+                
+                # Si hay nodos solapados, asegurarse de que el seleccionado esté encima
+                if nodos_solapados:
+                    # El nodo seleccionado ya está en z=1000
+                    # Los otros nodos solapados los ponemos en z=999 para que queden justo debajo
+                    for nodo_solapado in nodos_solapados:
+                        nodo_solapado.setZValue(999)
+
+    def seleccionar_nodo_desde_mapa(self):
+        """Versión modificada para manejar nodos solapados"""
+        if self._changing_selection:
+            return
+            
+        seleccionados = self.scene.selectedItems()
+        if not seleccionados:
+            return
+            
+        nodo_item = seleccionados[0]
+        nodo = nodo_item.nodo
+
+        # --- DETECCIÓN DE NODOS SUPERPUESTOS ---
+        pos = nodo_item.scenePos()
+        # Usar un rectángulo pequeño alrededor del punto para detectar nodos cercanos
+        search_rect = nodo_item.boundingRect().translated(pos)
+        search_rect.adjust(-5, -5, 5, 5)  # Expandir un poco el área de búsqueda
+        
+        items_en_pos = self.scene.items(search_rect)
+        nodos_en_pos = []
+        
+        for item in items_en_pos:
+            if isinstance(item, NodoItem):
+                # Verificar si está realmente superpuesto (misma posición aproximada)
+                item_pos = item.scenePos()
+                if (abs(item_pos.x() - pos.x()) < 10 and 
+                    abs(item_pos.y() - pos.y()) < 10):
+                    nodos_en_pos.append(item)
+        
+        if len(nodos_en_pos) > 1:
+            # Hay nodos superpuestos, ajustar z-values primero
+            for nodo_en_pos in nodos_en_pos:
+                if nodo_en_pos == nodo_item:
+                    nodo_en_pos.setZValue(1000)  # El seleccionado encima
+                else:
+                    nodo_en_pos.setZValue(999)   # Los otros justo debajo
+            
+            # Mostrar menú
+            self.mostrar_menu_nodos_superpuestos(nodos_en_pos, pos)
+            return  # El menú manejará la selección
+
+        # --- CONTINUAR CON SELECCIÓN NORMAL ---
+        self._changing_selection = True
+        try:
+            # Deseleccionar rutas primero
+            if hasattr(self.view, "rutasList"):
+                self.view.rutasList.clearSelection()
+            
+            # Primero restaurar todos los nodos a color normal
+            self.restaurar_colores_nodos()
+            
+            # Asegurar que el nodo seleccionado esté encima
+            nodo_item.setZValue(1000)
+            
+            # Deseleccionar todos los nodos primero
+            for item in self.scene.selectedItems():
+                if item != nodo_item:
+                    item.setSelected(False)
+            
+            # Resaltar el nodo seleccionado
+            nodo_item.set_selected_color()
+            
+            # Sincronizar con la lista lateral
+            nodo_id = nodo.get('id')
+            for i in range(self.view.nodosList.count()):
+                item = self.view.nodosList.item(i)
+                widget = self.view.nodosList.itemWidget(item)
+                if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo_id:
+                    self.view.nodosList.setCurrentItem(item)
+                    self.mostrar_propiedades_nodo(nodo)
+                    break
+        finally:
+            self._changing_selection = False
+
+    def seleccionar_nodo_desde_lista(self):
+        """Versión modificada para manejar nodos solapados"""
+        if self._changing_selection:
+            return
+        items = self.view.nodosList.selectedItems()
+        if not items:
+            return
+        
+        # Obtener el nodo del widget
+        for i in range(self.view.nodosList.count()):
+            item = self.view.nodosList.item(i)
+            if item.isSelected():
+                widget = self.view.nodosList.itemWidget(item)
+                if widget and hasattr(widget, 'nodo_id'):
+                    nodo_id = widget.nodo_id
+                    nodo = self.obtener_nodo_por_id(nodo_id)
+                    if nodo:
+                        self._changing_selection = True
+                        try:
+                            # Deseleccionar rutas primero
+                            if hasattr(self.view, "rutasList"):
+                                self.view.rutasList.clearSelection()
+                            
+                            # Primero restaurar todos los nodos a color normal
+                            self.restaurar_colores_nodos()
+                            
+                            # Deseleccionar todo en la escena primero
+                            for scene_item in self.scene.selectedItems():
+                                scene_item.setSelected(False)
+                            
+                            # Buscar y seleccionar el nodo correspondiente
+                            for scene_item in self.scene.items():
+                                if isinstance(scene_item, NodoItem) and scene_item.nodo.get('id') == nodo_id:
+                                    scene_item.setSelected(True)
+                                    
+                                    # Asegurar que el nodo esté encima de todos
+                                    scene_item.setZValue(1000)
+                                    
+                                    # Verificar si hay nodos solapados
+                                    pos = scene_item.scenePos()
+                                    rect = scene_item.boundingRect().translated(pos)
+                                    
+                                    # Buscar nodos solapados
+                                    for otro_item in self.scene.items():
+                                        if isinstance(otro_item, NodoItem) and otro_item != scene_item:
+                                            otro_pos = otro_item.scenePos()
+                                            if (abs(otro_pos.x() - pos.x()) < 10 and 
+                                                abs(otro_pos.y() - pos.y()) < 10):
+                                                # Nodo solapado, ponerlo justo debajo
+                                                otro_item.setZValue(999)
+                                    
+                                    # Aplicar color de selección
+                                    scene_item.set_selected_color()
+                                    self.view.marco_trabajo.centerOn(scene_item)
+                                    self.mostrar_propiedades_nodo(nodo)
+                                    break
+                        finally:
+                            self._changing_selection = False
+                    break
+
+    def seleccionar_nodo_especifico(self, nodo):
+        """Selecciona un nodo específico desde el menú de superposición - Versión modificada"""
+        self._changing_selection = True
+        try:
+            # Limpiar selecciones previas
+            for item in self.scene.selectedItems():
+                item.setSelected(False)
+            
+            # Primero restaurar todos los nodos a color normal
+            self.restaurar_colores_nodos()
+            
+            # Buscar y seleccionar el nodo específico en la escena
+            for item in self.scene.items():
+                if isinstance(item, NodoItem) and item.nodo == nodo:
+                    item.setSelected(True)
+                    
+                    # Asegurar que el nodo seleccionado esté encima
+                    item.setZValue(1000)
+                    
+                    # Verificar si hay nodos solapados
+                    pos = item.scenePos()
+                    
+                    # Poner otros nodos solapados justo debajo
+                    for otro_item in self.scene.items():
+                        if isinstance(otro_item, NodoItem) and otro_item != item:
+                            otro_pos = otro_item.scenePos()
+                            if (abs(otro_pos.x() - pos.x()) < 10 and 
+                                abs(otro_pos.y() - pos.y()) < 10):
+                                otro_item.setZValue(999)
+                    
+                    item.set_selected_color()
+                    self.view.marco_trabajo.centerOn(item)
+                    break
+            
+            # Sincronizar con la lista lateral
+            nodo_id = nodo.get('id')
+            for i in range(self.view.nodosList.count()):
+                item = self.view.nodosList.item(i)
+                widget = self.view.nodosList.itemWidget(item)
+                if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo_id:
+                    self.view.nodosList.setCurrentItem(item)
+                    self.mostrar_propiedades_nodo(nodo)
+                    break
+        finally:
+            self._changing_selection = False
+
+    def eventFilter(self, obj, event):
+        # Detectar teclas presionadas
+        if event.type() == QEvent.KeyPress:
+            self.keyPressEvent(event)
+            return True
+        
+        # Detectar click izquierdo en el viewport
+        if event.type() == QEvent.MouseButtonPress:
+            # Mapear a escena
+            pos = self.view.marco_trabajo.mapToScene(event.pos())
+            
+            # PRIMERO: Si estamos en modo ruta o modo colocar, NO manejar el clic aquí
+            # Los controladores respectivos manejarán los clics a través de su eventFilter
+            if self.modo_actual in ["ruta", "colocar"]:
+                return False  # Dejar que el controlador respectivo maneje el clic
+            
+            # SEGUNDO: Comportamiento normal (solo si NO estamos en modo ruta o colocar)
+            items = self.scene.items(pos)
+            if not any(isinstance(it, NodoItem) for it in items):
+                # deseleccionar items de la escena
+                try:
+                    for it in self.scene.selectedItems():
+                        it.setSelected(False)
+                except Exception:
+                    pass
+                
+                # Restaurar z-values normales a todos los nodos
+                for item in self.scene.items():
+                    if isinstance(item, NodoItem):
+                        item.setZValue(1)
+                    
+                # deseleccionar lista de nodos
+                try:
+                    self.view.nodosList.clearSelection()
+                except Exception:
+                    pass
+                
+                # deseleccionar lista de rutas y limpiar highlights
+                try:
+                    if hasattr(self.view, "rutasList"):
+                        self.view.rutasList.clearSelection()
+                except Exception:
+                    pass
+                
+                self._clear_highlight_lines()
+                
+                # limpiar propertiesTable
+                try:
+                    self.view.propertiesTable.clear()
+                    self.view.propertiesTable.setRowCount(0)
+                    self.view.propertiesTable.setColumnCount(2)
+                    self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
+                except Exception:
+                    pass
+                
+                # Restaurar colores de nodos
+                for item in self.scene.items():
+                    if isinstance(item, NodoItem):
+                        item.set_normal_color()
+        return False

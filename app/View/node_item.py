@@ -6,12 +6,17 @@ from Model.Nodo import Nodo
 class NodoItem(QGraphicsObject):
     moved = pyqtSignal(object)  # emite (id, x, y) o el objeto nodo según preferencia
     movimiento_iniciado = pyqtSignal(object, int, int)  # Señal para inicio de movimiento: (nodo, x_inicial, y_inicial)
+    # NUEVA SEÑAL: cuando el nodo es seleccionado
+    nodo_seleccionado = pyqtSignal(object)
 
     def __init__(self, nodo: Nodo, size=20, editor=None):
         super().__init__()
         self.nodo = nodo
         self.size = size
         self.editor = editor
+        
+        # Valor z original para restaurar después
+        self.z_value_original = 1
 
         # Enviar cambios de geometría para que itemChange reciba ItemPositionHasChanged
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
@@ -30,7 +35,7 @@ class NodoItem(QGraphicsObject):
         self.setFlag(QGraphicsObject.ItemIsFocusable, True)
         # ItemIsMovable se activa/desactiva desde EditorController según el modo
         self.setAcceptedMouseButtons(Qt.LeftButton)
-        self.setZValue(1)
+        self.setZValue(self.z_value_original)
 
         # Estado interno para detectar arrastre
         self._dragging = False
@@ -208,6 +213,20 @@ class NodoItem(QGraphicsObject):
 
     def itemChange(self, change, value):
         try:
+            if change == QGraphicsObject.ItemSelectedChange:
+                # Cuando el nodo es seleccionado
+                if value:  # Si se está seleccionando
+                    # Guardar el valor z original
+                    self.z_value_original = self.zValue()
+                    # Establecer un valor z muy alto para que esté encima de todos
+                    self.setZValue(1000)
+                    # Emitir señal de nodo seleccionado
+                    if self.editor:
+                        self.nodo_seleccionado.emit(self)
+                else:  # Si se está deseleccionando
+                    # Restaurar el valor z original
+                    self.setZValue(self.z_value_original)
+            
             if change == QGraphicsObject.ItemPositionHasChanged:
                 # Solo actualizar al finalizar el movimiento
                 p = self.scenePos()
