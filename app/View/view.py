@@ -1,5 +1,5 @@
 from PyQt5 import uic
-from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QPushButton, QLabel, QListWidgetItem, QSizePolicy
+from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QPushButton, QLabel, QListWidgetItem, QSizePolicy, QVBoxLayout
 from PyQt5.QtCore import Qt, pyqtSignal, QSize
 from PyQt5.QtGui import QFont
 import os
@@ -216,8 +216,52 @@ class EditorView(QMainWindow):
             print("✗ ADVERTENCIA: No se encontró workLayout")
             self.marco_trabajo = self.zoomView
         
+        # --- NUEVA BARRA DE INFORMACIÓN EN PARTE INFERIOR ---
+        # Crear QLabel para mostrar información del modo
+        self.status_label = QLabel()
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setStyleSheet("""
+            QLabel {
+                background-color: #2b2b2b;
+                color: #ffffff;
+                padding: 5px;
+                border-top: 1px solid #444444;
+                font-size: 11px;
+            }
+        """)
+        self.status_label.setFixedHeight(25)  # Altura fija para la barra
+        
+        # Agregar al layout principal (mainLayout es QVBoxLayout en centralwidget)
+        # Necesitamos acceder al layout del centralwidget
+        if hasattr(self.centralwidget, 'layout'):
+            main_layout = self.centralwidget.layout()
+            if main_layout:
+                # Insertar el label al final del layout (parte inferior)
+                main_layout.addWidget(self.status_label)
+                print("✓ Barra de información agregada en parte inferior")
+            else:
+                print("✗ No se encontró layout principal")
+        else:
+            print("✗ No se pudo acceder al layout principal")
+        
         # Referencia al controlador (se establecerá después)
         self.controller = None
+        
+        # Establecer texto inicial
+        self.actualizar_descripcion_modo("navegacion")
+    
+    def actualizar_descripcion_modo(self, modo):
+        """Actualiza la descripción del modo en la barra inferior"""
+        descripciones = {
+            "navegacion": "Modo navegación: Usa el ratón para desplazarte por el mapa. Haz clic en un nodo para seleccionarlo.",
+            "mover": "Modo mover: Arrastra los nodos para cambiar su posición. Usa Ctrl+Z para deshacer y Ctrl+Y para rehacer.",
+            "colocar": "Modo colocar: Haz clic en el mapa para colocar un nuevo nodo.",
+            "ruta": "Modo ruta: Haz clic en nodos existentes o en el mapa para crear nuevos nodos y formar una ruta. Presiona Enter para finalizar la ruta o Escape para cancelar."
+        }
+        
+        texto = descripciones.get(modo, "Modo desconocido")
+        self.status_label.setText(texto)
+        print(f"✓ Descripción del modo actualizada: {modo}")
     
     def set_controller(self, controller):
         """Establece la referencia al controlador"""

@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (
     QFileDialog, QGraphicsScene, QGraphicsPixmapItem,
     QButtonGroup, QListWidgetItem,
-    QTableWidgetItem, QHeaderView, QMenu, QMessageBox
+    QTableWidgetItem, QHeaderView, QMenu, QMessageBox, QLabel
 )
 from PyQt5.QtGui import QPixmap, QPen, QColor
 from PyQt5.QtCore import Qt, QEvent, QObject, QSize
@@ -124,6 +124,9 @@ class EditorController(QObject):
             self.inicializar_visibilidad()
             # Asegurar que los botones estén inicializados
             self._actualizar_lista_nodos_con_widgets()
+        
+        # --- NUEVO: Actualizar descripción del modo inicial ---
+        self.actualizar_descripcion_modo()
 
     # --- MÉTODOS DE CONVERSIÓN PÍXELES-METROS ---
     def pixeles_a_metros(self, valor_px):
@@ -247,6 +250,10 @@ class EditorController(QObject):
             self.restaurar_colores_nodos()
             
             print("Modo por defecto activado: navegación del mapa y selección")
+            
+            # --- NUEVO: Actualizar descripción del modo ---
+            self.actualizar_descripcion_modo()
+            
             return
 
         # Desactivar los otros botones
@@ -280,6 +287,9 @@ class EditorController(QObject):
                         pass
 
             print("Modo Mover activado: nodos arrastrables, mapa fijo")
+            
+            # --- NUEVO: Actualizar descripción del modo ---
+            self.actualizar_descripcion_modo("mover")
 
         elif boton == self.view.colocar_vertice_button:
             # --- MODO COLOCAR ---
@@ -296,6 +306,9 @@ class EditorController(QObject):
             self.view.marco_trabajo.setDragMode(self.view.marco_trabajo.NoDrag)
             
             print("Modo Colocar activado: añadir nuevos nodos")
+            
+            # --- NUEVO: Actualizar descripción del modo ---
+            self.actualizar_descripcion_modo("colocar")
 
         elif boton == self.view.crear_ruta_button:
             # --- MODO RUTA ---
@@ -320,15 +333,32 @@ class EditorController(QObject):
             self.view.marco_trabajo.setDragMode(self.view.marco_trabajo.NoDrag)
             
             print("Modo Ruta activado: crear rutas entre nodos")
-            print("Instrucciones:")
-            print("- Haz clic en nodos existentes o en el mapa para crear nuevos")
-            print("- Los nodos se conectarán con líneas verdes")
-            print("- Presiona ENTER para finalizar la ruta")
-            print("- Presiona ESC para cancelar")
-            print("- Haz clic en el botón de ruta nuevamente para terminar")
+            
+            # --- NUEVO: Actualizar descripción del modo ---
+            self.actualizar_descripcion_modo("ruta")
 
         # Actualizar líneas después de cambiar modo
         self.actualizar_lineas_rutas()
+    
+    # --- NUEVO MÉTODO: Actualizar descripción del modo ---
+    def actualizar_descripcion_modo(self, modo=None):
+        """
+        Actualiza la descripción del modo actual en la barra inferior.
+        Si no se especifica modo, usa self.modo_actual.
+        """
+        if modo is None:
+            modo = self.modo_actual
+        
+        # Si no hay modo activo, usar navegación por defecto
+        if modo is None:
+            modo = "navegacion"
+        
+        # Llamar al método de la vista para actualizar
+        if hasattr(self.view, 'actualizar_descripcion_modo'):
+            try:
+                self.view.actualizar_descripcion_modo(modo)
+            except Exception as e:
+                print(f"Error al actualizar descripción del modo: {e}")
 
     # --- MÉTODOS PARA MANEJO DE EVENTOS DE TECLADO ---
     
@@ -344,6 +374,9 @@ class EditorController(QObject):
                 self.view.crear_ruta_button.setChecked(False)
                 # Y llamar a cambiar_modo para limpiar todo
                 self.cambiar_modo(self.view.crear_ruta_button)
+                
+                # --- NUEVO: Actualizar descripción al volver a modo navegación ---
+                self.actualizar_descripcion_modo("navegacion")
                 
             except Exception as e:
                 print(f"Error al finalizar ruta con Enter: {e}")
@@ -362,6 +395,9 @@ class EditorController(QObject):
                 self.view.crear_ruta_button.setChecked(False)
                 # Y llamar a cambiar_modo para limpiar todo
                 self.cambiar_modo(self.view.crear_ruta_button)
+                
+                # --- NUEVO: Actualizar descripción al volver a modo navegación ---
+                self.actualizar_descripcion_modo("navegacion")
                 
             except Exception as e:
                 print(f"Error al cancelar ruta: {e}")
