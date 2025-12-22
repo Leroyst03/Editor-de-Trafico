@@ -23,6 +23,9 @@ class EditorController(QObject):
         # --- ESCALA GLOBAL: 1 píxel = 0.05 metros ---
         self.ESCALA = 0.05
 
+        if self.proyecto:
+            self._conectar_señales_proyecto()
+
         # --- Inicializar escena con padre ---
         self.scene = QGraphicsScene(self.view.marco_trabajo)
         self.view.marco_trabajo.setScene(self.scene)
@@ -1518,7 +1521,7 @@ class EditorController(QObject):
         return f"[{', '.join(str(id) for id in ids)}]"
 
     def _actualizar_propiedad_ruta(self, item):
-        """Actualiza la ruta cuando el usuario edita propertiesTable"""
+        """Actualiza la ruta a través del proyecto para notificar cambios"""
         if item.column() != 1:
             return
             
@@ -1607,20 +1610,10 @@ class EditorController(QObject):
                 except Exception as e:
                     print(f"Error procesando lista de visita: {e}")
 
-            # Normalizar y actualizar referencia en proyecto.rutas
+            # Normalizar y actualizar referencia en proyecto.rutas usando el método del proyecto
             self._normalize_route_nodes(ruta_dict)
+            self.proyecto.actualizar_ruta(self.ruta_actual_idx, ruta_dict)
             
-            # Actualizar la ruta en el proyecto
-            self.proyecto.rutas[self.ruta_actual_idx] = ruta_dict
-
-            # Actualizar UI
-            self._dibujar_rutas()
-            self._mostrar_rutas_lateral()
-            
-            # Reseleccionar la ruta para actualizar la vista
-            if hasattr(self.view, "rutasList"):
-                self.view.rutasList.setCurrentRow(self.ruta_actual_idx)
-
             print(f"Ruta actualizada exitosamente")
             
         except Exception as err:
@@ -1785,12 +1778,7 @@ class EditorController(QObject):
             print("Error en actualizar_propiedades_valores:", err)
 
     def _actualizar_propiedad_nodo(self, item):
-        """
-        Maneja cambios en propertiesTable para un nodo.
-        - Evita reentradas con self._updating_ui.
-        - Parsea el valor (ast.literal_eval cuando sea posible).
-        - Actualiza el modelo (nodo.update) y la UI.
-        """
+        """Actualiza la propiedad de un nodo a través del proyecto para notificar cambios"""
         if self._updating_ui or item.column() != 1:
             return
 
@@ -1808,7 +1796,6 @@ class EditorController(QObject):
         try:
             # Si la clave es X o Y, convertir de metros a píxeles
             if clave in ["X", "Y"]:
-                # Asumimos que el usuario introduce metros
                 try:
                     valor_metros = float(valor)
                     valor = self.metros_a_pixeles(valor_metros)
@@ -1816,101 +1803,13 @@ class EditorController(QObject):
                     print(f"Error: Valor de {clave} debe ser un número")
                     return
 
-            # Actualizar el modelo
-            if hasattr(nodo, "update"):
-                nodo.update({clave: valor})
-            else:
-                try:
-                    setattr(nodo, clave, valor)
-                except Exception:
-                    pass
-            print(f"Nodo actualizado: {clave} = {valor}")
+            # Usar el método del proyecto para actualizar (esto emitirá la señal)
+            self.proyecto.actualizar_nodo({clave: valor, "id": nodo.get('id')})
+            
         except Exception as err:
             print("Error actualizando nodo en el modelo:", err)
             return
-
-        # Si cambió el objetivo, actualizar el nodo visual
-        if clave == "objetivo":
-            try:
-                for scene_item in self.scene.items():
-                    if isinstance(scene_item, NodoItem) and getattr(scene_item, "nodo", None) == nodo:
-                        scene_item.actualizar_objetivo()
-                        break
-            except Exception as e:
-                print(f"Error actualizando objetivo: {e}")
-
-        # Si cambiaron coordenadas, actualizar la posición visual del NodoItem
-        if clave in ("X", "Y"):
-            try:
-                for scene_item in self.scene.items():
-                    if isinstance(scene_item, NodoItem) and getattr(scene_item, "nodo", None) == nodo:
-                        try:
-                            scene_item.actualizar_posicion()
-                        except Exception:
-                            try:
-                                x = int(nodo.get("X", 0)) if hasattr(nodo, "get") else int(getattr(nodo, "X", 0))
-                                y = int(nodo.get("Y", 0)) if hasattr(nodo, "get") else int(getattr(nodo, "Y", 0))
-                                scene_item.setPos(x - scene_item.size / 2, y - scene_item.size / 2)
-                            except Exception:
-                                pass
-                        break
-            except Exception:
-                pass
-
-            # Forzar actualización de líneas de rutas asociadas
-            try:
-                # Buscar el NodoItem correspondiente
-                for scene_item in self.scene.items():
-                    if isinstance(scene_item, NodoItem) and getattr(scene_item, "nodo", None) == nodo:
-                        self.on_nodo_moved(scene_item)
-                        break
-            except Exception:
-                try:
-                    self._dibujar_rutas()
-                except Exception:
-                    pass
-
-        # Actualizar texto en la lista lateral (si existe)
-        try:
-            for i in range(self.view.nodosList.count()):
-                li = self.view.nodosList.item(i)
-                widget = self.view.nodosList.itemWidget(li)
-                if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo.get('id'):
-                    x_px = nodo.get('X', 0)
-                    y_px = nodo.get('Y', 0)
-                    # Convertir a metros para mostrar
-                    x_m = self.pixeles_a_metros(x_px)
-                    y_m = self.pixeles_a_metros(y_px)
-                    objetivo = nodo.get('objetivo', 0)
-                    
-                    # Determinar texto según objetivo
-                    if objetivo == 1:
-                        texto_objetivo = "IN"
-                    elif objetivo == 2:
-                        texto_objetivo = "OUT"
-                    elif objetivo == 3:
-                        texto_objetivo = "I/O"
-                    else:
-                        texto_objetivo = "Sin objetivo"
-                    
-                    widget.lbl_texto.setText(f"ID {nodo.get('id')} - {texto_objetivo} ({x_m:.2f}, {y_m:.2f})")
-                    break
-        except Exception:
-            pass
-
-        # Si la tabla de propiedades está mostrando este nodo, mantenerla sincronizada
-        try:
-            seleccionados = self.view.nodosList.selectedItems()
-            if seleccionados:
-                for i in range(self.view.nodosList.count()):
-                    item = self.view.nodosList.item(i)
-                    if item.isSelected():
-                        widget = self.view.nodosList.itemWidget(item)
-                        if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo.get('id'):
-                            self.actualizar_propiedades_valores(nodo, claves=("X", "Y"))
-                            break
-        except Exception:
-            pass
+        
 
     # --- Eliminar nodo con reconfiguración de rutas ---
     def eliminar_nodo(self, nodo, nodo_item):
@@ -2374,7 +2273,7 @@ class EditorController(QObject):
 
     # --- Actualizar líneas cuando un nodo se mueve ---
     def on_nodo_moved(self, nodo_item):
-        """VERSIÓN MEJORADA con reparación de referencias"""
+        """Versión mejorada que usa el sistema de notificación del proyecto"""
         try:
             nodo = getattr(nodo_item, "nodo", None)
             if not nodo:
@@ -2388,32 +2287,9 @@ class EditorController(QObject):
             # 2. Obtener ID del nodo movido
             nodo_id = nodo.get("id") if isinstance(nodo, dict) else getattr(nodo, "id", None)
 
-            # 3. Actualizar modelo
-            if isinstance(nodo, dict):
-                nodo["X"] = x
-                nodo["Y"] = y
-            else:
-                setattr(nodo, "X", x)
-                setattr(nodo, "Y", y)
-
-            # 4. REPARAR REFERENCIAS ANTES DE ACTUALIZAR RUTAS
-            self._reparar_referencias_rutas()
-
-            # 5. ACTUALIZAR UI
-            self.actualizar_lista_nodo(nodo)
-            self.actualizar_propiedades_valores(nodo, claves=("X", "Y"))
-
-            # 6. ACTUALIZAR RUTAS
-            self._dibujar_rutas()
-
-            # 7. ACTUALIZAR HIGHLIGHTS
-            if hasattr(self.view, "rutasList") and self.view.rutasList.selectedItems():
-                self.seleccionar_ruta_desde_lista()
-
-            # 8. FORZAR ACTUALIZACIÓN VISUAL
-            self.scene.update()
-            self.view.marco_trabajo.viewport().update()
-
+            # 3. Actualizar modelo a través del proyecto (esto emitirá la señal)
+            self.proyecto.actualizar_nodo({"id": nodo_id, "X": x, "Y": y})
+            
         except Exception as err:
             print(f"ERROR CRÍTICO en on_nodo_moved: {err}")
 
@@ -3233,3 +3109,110 @@ class EditorController(QObject):
                     if isinstance(item, NodoItem):
                         item.set_normal_color()
         return False
+    
+    # --- OBSERVER PATTERN: MÉTODOS PARA ACTUALIZACIÓN AUTOMÁTICA ---
+    def _conectar_señales_proyecto(self):
+        """Conecta las señales del proyecto para actualizar la UI automáticamente"""
+        if not self.proyecto:
+            return
+        
+        # Conectar señales de cambios
+        self.proyecto.nodo_agregado.connect(self._on_nodo_agregado)
+        self.proyecto.nodo_modificado.connect(self._on_nodo_modificado)
+        self.proyecto.ruta_agregada.connect(self._on_ruta_agregada)
+        self.proyecto.ruta_modificada.connect(self._on_ruta_modificada)
+        self.proyecto.proyecto_cambiado.connect(self._on_proyecto_cambiado)
+    
+    def _on_nodo_agregado(self, nodo):
+        """Se llama automáticamente cuando se agrega un nuevo nodo"""
+        print(f"Observer: Nodo {nodo.get('id')} agregado, actualizando UI...")
+        
+        # Inicializar visibilidad del nodo
+        self._inicializar_nodo_visibilidad(nodo, agregar_a_lista=True)
+        
+        # Actualizar rutas si existen
+        self._dibujar_rutas()
+    
+    def _on_nodo_modificado(self, nodo):
+        """Se llama automáticamente cuando se modifica un nodo"""
+        print(f"Observer: Nodo {nodo.get('id')} modificado, actualizando UI...")
+        
+        # Actualizar lista lateral del nodo
+        self.actualizar_lista_nodo(nodo)
+        
+        # Actualizar propiedades si el nodo está seleccionado
+        seleccionados = self.view.nodosList.selectedItems()
+        for i in range(self.view.nodosList.count()):
+            item = self.view.nodosList.item(i)
+            widget = self.view.nodosList.itemWidget(item)
+            if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo.get('id'):
+                if item.isSelected():
+                    self.mostrar_propiedades_nodo(nodo)
+                break
+        
+        # Actualizar rutas que contengan este nodo
+        self._dibujar_rutas()
+        
+        # Actualizar NodoItem visual si existe
+        for item in self.scene.items():
+            if isinstance(item, NodoItem) and item.nodo.get('id') == nodo.get('id'):
+                item.actualizar_objetivo()
+                item.actualizar_posicion()
+                break
+    
+    def _on_ruta_agregada(self, ruta):
+        """Se llama automáticamente cuando se agrega una nueva ruta"""
+        print("Observer: Ruta agregada, actualizando UI...")
+        
+        # Actualizar lista lateral de rutas
+        self._actualizar_lista_rutas_con_widgets()
+        
+        # Redibujar rutas
+        self._dibujar_rutas()
+        
+        # Actualizar relaciones nodo-ruta
+        self._actualizar_todas_relaciones_nodo_ruta()
+    
+    def _on_ruta_modificada(self, ruta):
+        """Se llama automáticamente cuando se modifica una ruta"""
+        print("Observer: Ruta modificada, actualizando UI...")
+        
+        # Actualizar lista lateral de rutas
+        self._actualizar_lista_rutas_con_widgets()
+        
+        # Redibujar rutas
+        self._dibujar_rutas()
+        
+        # Si hay una ruta seleccionada, actualizar sus propiedades
+        if hasattr(self.view, "rutasList") and self.view.rutasList.selectedItems():
+            for i in range(self.view.rutasList.count()):
+                item = self.view.rutasList.item(i)
+                if item.isSelected():
+                    widget = self.view.rutasList.itemWidget(item)
+                    if widget and hasattr(widget, 'ruta_index'):
+                        self.mostrar_propiedades_ruta(self.proyecto.rutas[widget.ruta_index])
+                        break
+    
+    def _on_proyecto_cambiado(self):
+        """Se llama automáticamente cuando hay cambios generales en el proyecto"""
+        print("Observer: Proyecto cambiado, actualizando relaciones...")
+        
+        # Actualizar relaciones nodo-ruta
+        self._actualizar_todas_relaciones_nodo_ruta()
+        
+        # Forzar actualización visual
+        self.view.marco_trabajo.viewport().update()
+    
+    def _actualizar_referencias_proyecto(self, proyecto):
+        """Actualiza todas las referencias al proyecto en controladores y subcontroladores"""
+        self.proyecto = proyecto
+        
+        # Actualizar en subcontroladores
+        self.mover_ctrl.proyecto = proyecto
+        self.colocar_ctrl.proyecto = proyecto
+        self.ruta_ctrl.proyecto = proyecto
+        
+        # Reconectar señales del nuevo proyecto
+        self._conectar_señales_proyecto()
+        
+        print("✓ Referencias del proyecto actualizadas en todos los controladores")
