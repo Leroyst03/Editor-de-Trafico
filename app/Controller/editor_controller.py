@@ -231,6 +231,17 @@ class EditorController(QObject):
             self.mover_ctrl.desactivar()
             self.colocar_ctrl.desactivar()
             
+            # IMPORTANTE: Desconectar señales de movimiento
+            try:
+                for item in self.scene.items():
+                    if isinstance(item, NodoItem):
+                        try:
+                            item.moved.disconnect()
+                        except:
+                            pass
+            except Exception:
+                pass
+            
             # IMPORTANTE: CORRECCIÓN CRÍTICA - SIEMPRE DESACTIVAR EL CONTROLADOR DE RUTA
             try:
                 self.ruta_ctrl.desactivar()  # ← ESTA ES LA LÍNEA CLAVE QUE FALTABA
@@ -261,7 +272,7 @@ class EditorController(QObject):
 
         # Desactivar los otros botones
         for b in (self.view.mover_button, self.view.colocar_vertice_button, 
-                  self.view.crear_ruta_button):
+                self.view.crear_ruta_button):
             if b is not boton:
                 b.setChecked(False)
 
@@ -322,11 +333,9 @@ class EditorController(QObject):
                 print("✗ ERROR: No hay proyecto cargado. Crea o abre un proyecto primero.")
                 boton.setChecked(False)
                 QMessageBox.warning(self.view, "Error", 
-                                   "No hay proyecto cargado. Crea o abre un proyecto primero.")
+                                "No hay proyecto cargado. Crea o abre un proyecto primero.")
                 return
-                
-            # CORRECCIÓN CRÍTICA: NO verificar que haya nodos, porque el usuario puede crear el primer nodo
-            # al hacer clic en el mapa. Esta verificación estaba mal.
+                    
             print("Activando modo ruta - El usuario puede crear nodos haciendo clic en el mapa")
             
             # Activar modo ruta
@@ -2273,25 +2282,437 @@ class EditorController(QObject):
 
     # --- Actualizar líneas cuando un nodo se mueve ---
     def on_nodo_moved(self, nodo_item):
-        """Versión mejorada que usa el sistema de notificación del proyecto"""
+        """Versión CORREGIDA para actualización en tiempo real durante arrastre"""
         try:
+            # Verificar que estamos en modo mover
+            if self.modo_actual != "mover":
+                return
+                
+            print(f"DEBUG on_nodo_moved: Llamado para nodo_item tipo {type(nodo_item)}")
+            
             nodo = getattr(nodo_item, "nodo", None)
             if not nodo:
+                print("ERROR: nodo_item no tiene atributo 'nodo'")
                 return
 
-            # 1. Obtener posición ACTUAL del nodo
+            # Obtener posición ACTUAL del nodo DURANTE el arrastre
             scene_pos = nodo_item.scenePos()
             x = int(scene_pos.x() + nodo_item.size / 2)
             y = int(scene_pos.y() + nodo_item.size / 2)
 
-            # 2. Obtener ID del nodo movido
-            nodo_id = nodo.get("id") if isinstance(nodo, dict) else getattr(nodo, "id", None)
+            # Obtener ID del nodo movido - FORMA MEJORADA
+            nodo_id = None
+            
+            # Método 1: Intentar obtener directamente del nodo
+            if isinstance(nodo, dict):
+                nodo_id = nodo.get("id")
+                print(f"DEBUG on_nodo_moved: nodo es dict, id={nodo_id}")
+            elif hasattr(nodo, "get"):
+                nodo_id = nodo.get("id")
+                print(f"DEBUG on_nodo_moved: nodo tiene get(), id={nodo_id}")
+            elif hasattr(nodo, "id"):
+                nodo_id = getattr(nodo, "id")
+                print(f"DEBUG on_nodo_moved: nodo tiene atributo id, id={nodo_id}")
+            
+            # Método 2: Si aún no tenemos ID, intentar del nodo_item
+            if nodo_id is None and hasattr(nodo_item, "nodo_id"):
+                nodo_id = getattr(nodo_item, "nodo_id", None)
+                print(f"DEBUG on_nodo_moved: Obteniendo de nodo_item.nodo_id={nodo_id}")
+            
+            # Método 3: Último recurso - buscar en el proyecto
+            if nodo_id is None and self.proyecto:
+                for n in self.proyecto.nodos:
+                    # Comparar por referencia o por posición
+                    if n is nodo or (isinstance(n, dict) and n.get('X') == x and n.get('Y') == y):
+                        nodo_id = n.get('id') if isinstance(n, dict) else getattr(n, 'id', None)
+                        print(f"DEBUG on_nodo_moved: Encontrado por referencia, id={nodo_id}")
+                        break
 
-            # 3. Actualizar modelo a través del proyecto (esto emitirá la señal)
-            self.proyecto.actualizar_nodo({"id": nodo_id, "X": x, "Y": y})
+            if nodo_id is None:
+                print(f"ERROR: No se pudo obtener ID del nodo. Tipo nodo: {type(nodo)}")
+                # Intentar una última opción: si el nodo tiene __dict__
+                if hasattr(nodo, "__dict__"):
+                    print(f"DEBUG: __dict__ del nodo: {nodo.__dict__}")
+                    if 'id' in nodo.__dict__:
+                        nodo_id = nodo.__dict__['id']
+                        print(f"DEBUG: Encontrado id en __dict__: {nodo_id}")
+                
+                if nodo_id is None:
+                    return
+
+            print(f"DEBUG: Nodo {nodo_id} moviéndose a ({x}, {y})")
+            
+            # ACTUALIZACIÓN EN TIEMPO REAL de todas las rutas que contienen este nodo
+            self._actualizar_rutas_con_nodo_en_tiempo_real(nodo_id, x, y)
             
         except Exception as err:
-            print(f"ERROR CRÍTICO en on_nodo_moved: {err}")
+            print(f"ERROR en on_nodo_moved: {err}")
+            import traceback
+            traceback.print_exc()
+
+    def _actualizar_rutas_con_nodo_en_tiempo_real(self, nodo_id, x, y):
+        """Actualiza TODAS las rutas que contienen el nodo movido, usando las coordenadas en tiempo real"""
+        if not getattr(self, "proyecto", None) or not hasattr(self.proyecto, "rutas"):
+            print("DEBUG: No hay proyecto o rutas")
+            return
+        
+        print(f"DEBUG: Actualizando rutas para nodo {nodo_id} en ({x}, {y})")
+        
+        # Buscar todas las rutas que contienen este nodo
+        rutas_a_actualizar = []
+        for idx, ruta in enumerate(self.proyecto.rutas):
+            try:
+                ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+                
+                # Verificar si la ruta contiene el nodo movido
+                contiene_nodo = False
+                
+                # Función auxiliar para comparar IDs
+                def comparar_ids(nodo_ruta, target_id):
+                    if nodo_ruta is None:
+                        return False
+                    if isinstance(nodo_ruta, dict):
+                        return nodo_ruta.get("id") == target_id
+                    elif hasattr(nodo_ruta, "get"):
+                        return nodo_ruta.get("id") == target_id
+                    elif hasattr(nodo_ruta, "id"):
+                        return getattr(nodo_ruta, "id") == target_id
+                    return False
+                
+                # Verificar origen
+                if ruta_dict.get("origen") and comparar_ids(ruta_dict["origen"], nodo_id):
+                    contiene_nodo = True
+                    print(f"DEBUG: Ruta {idx} contiene nodo {nodo_id} como ORIGEN")
+                
+                # Verificar destino
+                if not contiene_nodo and ruta_dict.get("destino") and comparar_ids(ruta_dict["destino"], nodo_id):
+                    contiene_nodo = True
+                    print(f"DEBUG: Ruta {idx} contiene nodo {nodo_id} como DESTINO")
+                
+                # Verificar visita
+                if not contiene_nodo:
+                    for nodo_visita in ruta_dict.get("visita", []):
+                        if comparar_ids(nodo_visita, nodo_id):
+                            contiene_nodo = True
+                            print(f"DEBUG: Ruta {idx} contiene nodo {nodo_id} en VISITA")
+                            break
+                
+                if contiene_nodo:
+                    rutas_a_actualizar.append((idx, ruta_dict))
+            except Exception as e:
+                print(f"Error verificando ruta {idx}: {e}")
+                continue
+        
+        # Si no hay rutas que actualizar, salir
+        if not rutas_a_actualizar:
+            print(f"DEBUG: No se encontraron rutas que contengan el nodo {nodo_id}")
+            # Mostrar todas las rutas para debug
+            print("DEBUG: Rutas disponibles:")
+            for idx, ruta in enumerate(self.proyecto.rutas):
+                try:
+                    ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+                    print(f"  Ruta {idx}: {ruta_dict}")
+                except:
+                    print(f"  Ruta {idx}: ERROR al convertir")
+            return
+        
+        print(f"DEBUG: Encontradas {len(rutas_a_actualizar)} rutas para actualizar")
+        
+        # Actualizar las líneas de TODAS las rutas afectadas
+        self._actualizar_lineas_rutas_en_tiempo_real(rutas_a_actualizar, nodo_id, x, y)
+
+
+    def _obtener_id_de_nodo(self, nodo):
+        """Obtiene el ID de un nodo de manera segura"""
+        if not nodo:
+            return None
+        if isinstance(nodo, dict):
+            return nodo.get("id")
+        elif hasattr(nodo, "get"):
+            return nodo.get("id")
+        elif hasattr(nodo, "id"):
+            return getattr(nodo, "id")
+        return None
+
+    def _actualizar_lineas_rutas_en_tiempo_real(self, rutas_info, nodo_id, x, y):
+        """Actualiza las líneas de las rutas en tiempo real durante el arrastre"""
+        # IMPORTANTE: No limpiamos todas las líneas, solo las de las rutas afectadas
+        
+        pen = QPen(Qt.red, 2)
+        pen.setCosmetic(True)
+        
+        # Primero, eliminar las líneas de las rutas que vamos a actualizar
+        for idx, ruta_dict in rutas_info:
+            if idx < len(self._route_lines):
+                for line_item in self._route_lines[idx]:
+                    try:
+                        if line_item and line_item.scene() is not None:
+                            self.scene.removeItem(line_item)
+                    except Exception:
+                        pass
+                self._route_lines[idx] = []
+        
+        # Ahora, volver a dibujar CADA ruta con las coordenadas actualizadas
+        for idx, ruta_dict in rutas_info:
+            # Crear una copia del diccionario de la ruta para modificarla
+            ruta_actualizada = dict(ruta_dict)
+            
+            # Actualizar las coordenadas del nodo movido en la ruta
+            self._actualizar_coordenadas_en_ruta(ruta_actualizada, nodo_id, x, y)
+            
+            # Obtener todos los puntos de la ruta
+            puntos = self._obtener_puntos_de_ruta(ruta_actualizada)
+            
+            if len(puntos) < 2:
+                continue
+            
+            # Verificar visibilidad
+            if not self._ruta_es_visible(ruta_actualizada):
+                continue
+            
+            # Dibujar los segmentos de la ruta
+            route_line_items = []
+            for i in range(len(puntos) - 1):
+                n1, n2 = puntos[i], puntos[i + 1]
+                
+                try:
+                    x1 = self._obtener_coordenada_x(n1)
+                    y1 = self._obtener_coordenada_y(n1)
+                    x2 = self._obtener_coordenada_x(n2)
+                    y2 = self._obtener_coordenada_y(n2)
+                    
+                    # Solo dibujar si las coordenadas son válidas
+                    if x1 is not None and y1 is not None and x2 is not None and y2 is not None:
+                        line_item = self.scene.addLine(x1, y1, x2, y2, pen)
+                        line_item.setZValue(0.5)
+                        line_item.setData(0, ("route_line", idx, i))
+                        line_item.setVisible(True)
+                        
+                        route_line_items.append(line_item)
+                        
+                except Exception as e:
+                    print(f"Error dibujando segmento {i}: {e}")
+                    continue
+            
+            # Asegurarse de que tenemos espacio en el array
+            while len(self._route_lines) <= idx:
+                self._route_lines.append([])
+            
+            self._route_lines[idx] = route_line_items
+        
+        # Forzar actualización de la vista INMEDIATAMENTE
+        self.view.marco_trabajo.viewport().update()
+        print(f"DEBUG: {len(rutas_info)} rutas actualizadas en tiempo real")
+
+    def _actualizar_coordenadas_en_ruta(self, ruta_dict, nodo_id, x, y):
+        """Actualiza las coordenadas de un nodo específico en una ruta"""
+        # Actualizar origen
+        if ruta_dict.get("origen") and self._obtener_id_de_nodo(ruta_dict["origen"]) == nodo_id:
+            if isinstance(ruta_dict["origen"], dict):
+                ruta_dict["origen"]["X"] = x
+                ruta_dict["origen"]["Y"] = y
+            elif hasattr(ruta_dict["origen"], "update"):
+                ruta_dict["origen"].update({"X": x, "Y": y})
+        
+        # Actualizar destino
+        elif ruta_dict.get("destino") and self._obtener_id_de_nodo(ruta_dict["destino"]) == nodo_id:
+            if isinstance(ruta_dict["destino"], dict):
+                ruta_dict["destino"]["X"] = x
+                ruta_dict["destino"]["Y"] = y
+            elif hasattr(ruta_dict["destino"], "update"):
+                ruta_dict["destino"].update({"X": x, "Y": y})
+        
+        # Actualizar visita
+        else:
+            for nodo_visita in ruta_dict.get("visita", []):
+                if self._obtener_id_de_nodo(nodo_visita) == nodo_id:
+                    if isinstance(nodo_visita, dict):
+                        nodo_visita["X"] = x
+                        nodo_visita["Y"] = y
+                    elif hasattr(nodo_visita, "update"):
+                        nodo_visita.update({"X": x, "Y": y})
+                    break
+
+    def _obtener_puntos_de_ruta(self, ruta_dict):
+        """Obtiene todos los puntos de una ruta en orden"""
+        puntos = []
+        
+        if ruta_dict.get("origen"):
+            puntos.append(ruta_dict["origen"])
+        
+        if ruta_dict.get("visita"):
+            puntos.extend(ruta_dict["visita"])
+        
+        if ruta_dict.get("destino"):
+            puntos.append(ruta_dict["destino"])
+        
+        return puntos
+
+    def _ruta_es_visible(self, ruta_dict):
+        """Verifica si todos los nodos de una ruta están visibles"""
+        puntos = self._obtener_puntos_de_ruta(ruta_dict)
+        
+        for punto in puntos:
+            nodo_id = self._obtener_id_de_nodo(punto)
+            if nodo_id is not None and not self.visibilidad_nodos.get(nodo_id, True):
+                return False
+        
+        return True
+
+    def _obtener_coordenada_x(self, nodo):
+        """Obtiene la coordenada X de un nodo de manera segura"""
+        if isinstance(nodo, dict):
+            return nodo.get("X", 0)
+        elif hasattr(nodo, "get"):
+            return nodo.get("X", 0)
+        elif hasattr(nodo, "X"):
+            return getattr(nodo, "X", 0)
+        return 0
+
+    def _obtener_coordenada_y(self, nodo):
+        """Obtiene la coordenada Y de un nodo de manera segura"""
+        if isinstance(nodo, dict):
+            return nodo.get("Y", 0)
+        elif hasattr(nodo, "get"):
+            return nodo.get("Y", 0)
+        elif hasattr(nodo, "Y"):
+            return getattr(nodo, "Y", 0)
+        return 0
+
+    def _actualizar_rutas_con_nodo(self, nodo_id, nueva_x, nueva_y):
+        """Actualiza solo las rutas que contienen el nodo movido (más eficiente)"""
+        if not getattr(self, "proyecto", None) or not hasattr(self.proyecto, "rutas"):
+            return
+        
+        # Buscar rutas que contienen este nodo
+        rutas_a_actualizar = []
+        for idx, ruta in enumerate(self.proyecto.rutas):
+            try:
+                ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+                self._normalize_route_nodes(ruta_dict)
+                
+                # Verificar si la ruta contiene el nodo movido
+                contiene_nodo = False
+                if ruta_dict.get("origen") and ruta_dict["origen"].get("id") == nodo_id:
+                    contiene_nodo = True
+                elif ruta_dict.get("destino") and ruta_dict["destino"].get("id") == nodo_id:
+                    contiene_nodo = True
+                else:
+                    for nodo_visita in ruta_dict.get("visita", []):
+                        if nodo_visita.get("id") == nodo_id:
+                            contiene_nodo = True
+                            break
+                
+                if contiene_nodo:
+                    rutas_a_actualizar.append(idx)
+            except Exception:
+                continue
+        
+        # Actualizar solo las líneas de las rutas afectadas
+        self._actualizar_lineas_rutas_especificas(rutas_a_actualizar, nodo_id, nueva_x, nueva_y)
+
+    def _actualizar_lineas_rutas_especificas(self, indices_rutas, nodo_id=None, nueva_x=None, nueva_y=None):
+        """Actualiza solo las líneas de las rutas especificadas por sus índices"""
+        if not indices_rutas:
+            return
+        
+        # Eliminar líneas de estas rutas específicas
+        for idx in indices_rutas:
+            if idx < len(self._route_lines):
+                for line_item in self._route_lines[idx]:
+                    try:
+                        if line_item and line_item.scene() is not None:
+                            self.scene.removeItem(line_item)
+                    except Exception:
+                        pass
+                self._route_lines[idx] = []
+        
+        # Volver a dibujar estas rutas
+        pen = QPen(Qt.red, 2)
+        pen.setCosmetic(True)
+        
+        for idx in indices_rutas:
+            if idx >= len(self.proyecto.rutas):
+                continue
+                
+            ruta = self.proyecto.rutas[idx]
+            
+            # Verificar si la ruta está visible
+            if not self.visibilidad_rutas.get(idx, True):
+                continue
+                
+            try:
+                ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+            except Exception:
+                ruta_dict = ruta
+
+            self._normalize_route_nodes(ruta_dict)
+            
+            # Si estamos actualizando un nodo específico, actualizar sus coordenadas en la ruta
+            if nodo_id and nueva_x is not None and nueva_y is not None:
+                if ruta_dict.get("origen") and ruta_dict["origen"].get("id") == nodo_id:
+                    ruta_dict["origen"]["X"] = nueva_x
+                    ruta_dict["origen"]["Y"] = nueva_y
+                elif ruta_dict.get("destino") and ruta_dict["destino"].get("id") == nodo_id:
+                    ruta_dict["destino"]["X"] = nueva_x
+                    ruta_dict["destino"]["Y"] = nueva_y
+                else:
+                    for nodo_visita in ruta_dict.get("visita", []):
+                        if nodo_visita.get("id") == nodo_id:
+                            nodo_visita["X"] = nueva_x
+                            nodo_visita["Y"] = nueva_y
+                            break
+            
+            # Obtener puntos
+            puntos = []
+            if ruta_dict.get("origen"):
+                puntos.append(ruta_dict["origen"])
+            puntos.extend(ruta_dict.get("visita", []) or [])
+            if ruta_dict.get("destino"):
+                puntos.append(ruta_dict["destino"])
+
+            if len(puntos) < 2:
+                continue
+
+            # Verificar que todos los nodos de la ruta estén visibles
+            todos_visibles = True
+            for punto in puntos:
+                if isinstance(punto, dict):
+                    nodo_id_punto = punto.get('id')
+                    if nodo_id_punto is not None and not self.visibilidad_nodos.get(nodo_id_punto, True):
+                        todos_visibles = False
+                        break
+            
+            if not todos_visibles:
+                continue
+
+            route_line_items = []
+            for i in range(len(puntos) - 1):
+                n1, n2 = puntos[i], puntos[i + 1]
+                
+                try:
+                    x1 = n1.get("X", 0) if isinstance(n1, dict) else getattr(n1, "X", 0)
+                    y1 = n1.get("Y", 0) if isinstance(n1, dict) else getattr(n1, "Y", 0)
+                    x2 = n2.get("X", 0) if isinstance(n2, dict) else getattr(n2, "X", 0)
+                    y2 = n2.get("Y", 0) if isinstance(n2, dict) else getattr(n2, "Y", 0)
+                    
+                    line_item = self.scene.addLine(x1, y1, x2, y2, pen)
+                    line_item.setZValue(0.5)
+                    line_item.setData(0, ("route_line", idx, i))
+                    line_item.setVisible(True)
+                    
+                    route_line_items.append(line_item)
+                    
+                except Exception:
+                    continue
+            
+            if idx >= len(self._route_lines):
+                self._route_lines.extend([[]] * (idx - len(self._route_lines) + 1))
+            
+            self._route_lines[idx] = route_line_items
+
+        # Forzar actualización de la vista
+        self.view.marco_trabajo.viewport().update()
 
     # --- Utilidades para líneas y rutas ---
     def _clear_route_lines(self):
@@ -3216,3 +3637,5 @@ class EditorController(QObject):
         self._conectar_señales_proyecto()
         
         print("✓ Referencias del proyecto actualizadas en todos los controladores")
+
+    

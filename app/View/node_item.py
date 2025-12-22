@@ -227,26 +227,74 @@ class NodoItem(QGraphicsObject):
                     # Restaurar el valor z original
                     self.setZValue(self.z_value_original)
             
+            # CRÍTICO: Emitir moved DURANTE el arrastre (ItemPositionChange)
+            if change == QGraphicsObject.ItemPositionChange:
+                # Obtener la nueva posición propuesta
+                new_pos = value
+                cx = int(new_pos.x() + self.size / 2)
+                cy = int(new_pos.y() + self.size / 2)
+                
+                # DEBUG: Verificar estructura del nodo
+                if hasattr(self.nodo, "__dict__"):
+                    print(f"DEBUG NodoItem: nodo es objeto con id={getattr(self.nodo, 'id', 'NO ID')}")
+                elif isinstance(self.nodo, dict):
+                    print(f"DEBUG NodoItem: nodo es dict con id={self.nodo.get('id', 'NO ID')}")
+                else:
+                    print(f"DEBUG NodoItem: nodo tipo={type(self.nodo)}")
+                
+                # Actualizar modelo temporalmente durante el arrastre
+                if hasattr(self.nodo, "set_posicion"):
+                    self.nodo.set_posicion(cx, cy)
+                elif hasattr(self.nodo, "update"):
+                    # Asegurar que el nodo tenga ID antes de actualizar
+                    if isinstance(self.nodo, dict):
+                        self.nodo["X"] = cx
+                        self.nodo["Y"] = cy
+                        print(f"DEBUG NodoItem: Actualizado dict nodo {self.nodo.get('id')} a ({cx}, {cy})")
+                    else:
+                        # Si es un objeto Nodo, usar update
+                        self.nodo.update({"X": cx, "Y": cy})
+                        print(f"DEBUG NodoItem: Actualizado objeto nodo con update")
+                else:
+                    # Fallback: intentar establecer directamente
+                    try:
+                        setattr(self.nodo, "X", cx)
+                        setattr(self.nodo, "Y", cy)
+                        print(f"DEBUG NodoItem: Actualizado con setattr")
+                    except:
+                        pass
+                
+                # EMITIR SEÑAL DURANTE EL ARRASTRE - ESTO ES CLAVE
+                print(f"DEBUG NodoItem: Emitiendo moved para nodo_item")
+                self.moved.emit(self)
+                return value
+                
             if change == QGraphicsObject.ItemPositionHasChanged:
-                # Solo actualizar al finalizar el movimiento
+                # Al finalizar el movimiento
                 p = self.scenePos()
                 cx = int(p.x() + self.size / 2)
                 cy = int(p.y() + self.size / 2)
                 
+                print(f"DEBUG NodoItem: ItemPositionHasChanged - posición final ({cx}, {cy})")
+                
                 # Actualizar modelo
                 if hasattr(self.nodo, "set_posicion"):
                     self.nodo.set_posicion(cx, cy)
-                else:
-                    self.nodo.update({"X": cx, "Y": cy})
+                elif hasattr(self.nodo, "update"):
+                    if isinstance(self.nodo, dict):
+                        self.nodo["X"] = cx
+                        self.nodo["Y"] = cy
+                    else:
+                        self.nodo.update({"X": cx, "Y": cy})
                 
-                # Emitir señal UNA sola vez
+                # Emitir señal al final también
                 self.moved.emit(self)
                 
             return super().itemChange(change, value)
         except Exception as err:
             print("Error en itemChange:", err)
             return super().itemChange(change, value)
-
+    
     def mouseReleaseEvent(self, event):
         try:
             if self._dragging and self._posicion_inicial:
