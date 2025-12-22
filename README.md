@@ -27,8 +27,6 @@ Si tienes python3: ``python3 main.py``, de lo contrario ``python main.py``
  * **Nuevo:** Nos permite crear un proyecto nuevo donde podemos escoger el mapa en el que se trabajará
  * **Abrir:** Podemos seguir trabajando sobre un proyecto ya empezado
  * **Guardar:** Guardar el trabajo actual en un archivo formato json
-
-#### Archivo (Por implmentar)
 * **Exportar archivo:** Permite exportar el proyecto a una tabla SQL que será interpretada por los AGVs
 
 ### Menú lateral nodos
