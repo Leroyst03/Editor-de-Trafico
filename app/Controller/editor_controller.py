@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import (
     QButtonGroup, QListWidgetItem,
     QTableWidgetItem, QHeaderView, QMenu, QMessageBox, QLabel
 )
-from PyQt5.QtGui import QPixmap, QPen, QColor
+from PyQt5.QtGui import QPixmap, QPen, QColor, QCursor
 from PyQt5.QtCore import Qt, QEvent, QObject, QSize
 from Model.Proyecto import Proyecto
 from Model.ExportadorDB import ExportadorDB
@@ -22,6 +22,10 @@ class EditorController(QObject):
         
         # --- ESCALA GLOBAL: 1 píxel = 0.05 metros ---
         self.ESCALA = 0.05
+
+        # --- NUEVO: Estado del cursor ---
+        self._cursor_sobre_nodo = False
+        self._arrastrando_nodo = False  # Para rastrear si estamos arrastrando un nodo
 
         if self.proyecto:
             self._conectar_señales_proyecto()
@@ -131,6 +135,9 @@ class EditorController(QObject):
         # --- NUEVO: Actualizar descripción del modo inicial ---
         self.actualizar_descripcion_modo()
 
+        # Asegurar que el cursor inicial sea correcto
+        self._actualizar_cursor()
+
     # --- MÉTODOS DE CONVERSIÓN PÍXELES-METROS ---
     def pixeles_a_metros(self, valor_px):
         """Convierte píxeles a metros usando la escala global."""
@@ -146,8 +153,96 @@ class EditorController(QObject):
         y_m = self.pixeles_a_metros(y_px)
         return f"{x_m:.2f}, {y_m:.2f}"
 
+    # --- MÉTODOS PARA GESTIÓN DE PUNTEROS ---
+    def _actualizar_cursor(self, cursor_tipo=None):
+        """
+        Actualiza el cursor del viewport según el modo y situación.
+        
+        Args:
+            cursor_tipo: Puede ser None (auto-determinar) o un valor de Qt.CursorShape
+        """
+        try:
+            # Depuración para entender qué está pasando
+            debug_info = f"DEBUG Cursor: modo={self.modo_actual}, sobre_nodo={self._cursor_sobre_nodo}, arrastrando={self._arrastrando_nodo}"
+            print(debug_info)
+            
+            if cursor_tipo is not None:
+                # Si se especifica un cursor específico, usarlo
+                self.view.marco_trabajo.viewport().setCursor(QCursor(cursor_tipo))
+                print(f"Cursor forzado a: {cursor_tipo}")
+                return
+            
+            # Determinar cursor según el modo actual y estado
+            if self.modo_actual is None:
+                # MODO POR DEFECTO (navegación)
+                if self._cursor_sobre_nodo:
+                    # ABSOLUTAMENTE SIEMPRE PointingHandCursor cuando está sobre un nodo
+                    cursor = Qt.PointingHandCursor
+                    print("MODO POR DEFECTO: PointingHandCursor (sobre nodo)")
+                else:
+                    # Dejar que Qt maneje el cursor de navegación (ScrollHandDrag)
+                    self.view.marco_trabajo.viewport().unsetCursor()
+                    print("MODO POR DEFECTO: Cursor por defecto de Qt")
+                    return
+                    
+            elif self.modo_actual == "mover":
+                # MODO MOVER
+                if self._arrastrando_nodo:
+                    # Mano cerrada cuando se está arrastrando un nodo
+                    cursor = Qt.ClosedHandCursor
+                    print("MODO MOVER: ClosedHandCursor (arrastrando nodo)")
+                else:
+                    # PointingHandCursor cuando no se está arrastrando
+                    cursor = Qt.PointingHandCursor
+                    print("MODO MOVER: PointingHandCursor")
+                    
+            elif self.modo_actual == "colocar":
+                # MODO COLOCAR VÉRTICE
+                cursor = Qt.ArrowCursor
+                print("MODO COLOCAR: ArrowCursor")
+                
+            elif self.modo_actual == "ruta":
+                # MODO RUTA
+                cursor = Qt.ArrowCursor
+                print("MODO RUTA: ArrowCursor")
+                
+            else:
+                # Cualquier otro modo
+                cursor = Qt.ArrowCursor
+                print("MODO DESCONOCIDO: ArrowCursor")
+            
+            # Aplicar el cursor
+            self.view.marco_trabajo.viewport().setCursor(QCursor(cursor))
+            
+        except Exception as e:
+            print(f"Error al actualizar cursor: {e}")
+
+    def nodo_hover_entered(self, nodo_item):
+        """Cuando el ratón entra en un nodo"""
+        self._cursor_sobre_nodo = True
+        print(f"HOVER ENTRADO: Nodo ID {nodo_item.nodo.get('id')}")
+        self._actualizar_cursor()
+
+    def nodo_hover_leaved(self, nodo_item):
+        """Cuando el ratón sale de un nodo"""
+        self._cursor_sobre_nodo = False
+        print(f"HOVER SALIDO: Nodo ID {nodo_item.nodo.get('id')}")
+        self._actualizar_cursor()
+
+    def nodo_arrastre_iniciado(self):
+        """Cuando se inicia el arrastre de un nodo en modo mover"""
+        if self.modo_actual == "mover":
+            self._arrastrando_nodo = True
+            print("ARRASRE INICIADO: Mano cerrada")
+            self._actualizar_cursor()
+
+    def nodo_arrastre_terminado(self):
+        """Cuando se termina el arrastre de un nodo"""
+        self._arrastrando_nodo = False
+        print("ARRASRE TERMINADO: Mano apuntando")
+        self._actualizar_cursor()
+
     # --- MÉTODOS NUEVOS PARA MANEJO DE PROYECTO ---
-    
     def _actualizar_referencias_proyecto(self, proyecto):
         """Actualiza todas las referencias al proyecto en controladores y subcontroladores"""
         self.proyecto = proyecto
@@ -224,8 +319,11 @@ class EditorController(QObject):
 
     # --- Gestión de modos ---
     def cambiar_modo(self, boton):
+        print(f"\n=== CAMBIANDO MODO: boton={boton.text()} ===")
+        
         # Si el botón ya estaba activado y se hace clic, se desactiva
         if not boton.isChecked():
+            print("Desactivando todos los modos...")
             # Desactivar todos los modos
             self.modo_actual = None
             self.mover_ctrl.desactivar()
@@ -244,7 +342,7 @@ class EditorController(QObject):
             
             # IMPORTANTE: CORRECCIÓN CRÍTICA - SIEMPRE DESACTIVAR EL CONTROLADOR DE RUTA
             try:
-                self.ruta_ctrl.desactivar()  # ← ESTA ES LA LÍNEA CLAVE QUE FALTABA
+                self.ruta_ctrl.desactivar()
             except Exception as e:
                 print(f"Error al desactivar ruta: {e}")
             
@@ -268,6 +366,12 @@ class EditorController(QObject):
             # --- NUEVO: Actualizar descripción del modo ---
             self.actualizar_descripcion_modo()
             
+            # --- NUEVO: Resetear estado de arrastre y actualizar cursor ---
+            self._arrastrando_nodo = False
+            self._cursor_sobre_nodo = False
+            print("Reset estados cursor: arrastrando=False, sobre_nodo=False")
+            self._actualizar_cursor()
+            
             return
 
         # Desactivar los otros botones
@@ -277,6 +381,7 @@ class EditorController(QObject):
                 b.setChecked(False)
 
         if boton == self.view.mover_button:
+            print("Activando modo MOVER...")
             # --- MODO MOVER ---
             self.modo_actual = "mover"
             self.mover_ctrl.activar()
@@ -304,8 +409,15 @@ class EditorController(QObject):
             
             # --- NUEVO: Actualizar descripción del modo ---
             self.actualizar_descripcion_modo("mover")
+            
+            # --- NUEVO: Resetear estado de arrastre y actualizar cursor ---
+            self._arrastrando_nodo = False
+            self._cursor_sobre_nodo = False
+            print("Reset estados cursor: arrastrando=False, sobre_nodo=False")
+            self._actualizar_cursor()
 
         elif boton == self.view.colocar_vertice_button:
+            print("Activando modo COLOCAR...")
             # --- MODO COLOCAR ---
             self.modo_actual = "colocar"
             self.colocar_ctrl.activar()
@@ -323,8 +435,15 @@ class EditorController(QObject):
             
             # --- NUEVO: Actualizar descripción del modo ---
             self.actualizar_descripcion_modo("colocar")
+            
+            # --- NUEVO: Resetear estado de arrastre y actualizar cursor ---
+            self._arrastrando_nodo = False
+            self._cursor_sobre_nodo = False
+            print("Reset estados cursor: arrastrando=False, sobre_nodo=False")
+            self._actualizar_cursor()
 
         elif boton == self.view.crear_ruta_button:
+            print("Activando modo RUTA...")
             # --- MODO RUTA ---
             self.modo_actual = "ruta"
             
@@ -348,6 +467,12 @@ class EditorController(QObject):
             
             # --- NUEVO: Actualizar descripción del modo ---
             self.actualizar_descripcion_modo("ruta")
+            
+            # --- NUEVO: Resetear estado de arrastre y actualizar cursor ---
+            self._arrastrando_nodo = False
+            self._cursor_sobre_nodo = False
+            print("Reset estados cursor: arrastrando=False, sobre_nodo=False")
+            self._actualizar_cursor()
 
         # Actualizar líneas después de cambiar modo
         self.actualizar_lineas_rutas()
@@ -528,6 +653,9 @@ class EditorController(QObject):
                 'x_inicial': x_inicial,
                 'y_inicial': y_inicial
             }
+            
+            # NUEVO: Iniciar arrastre para cambiar cursor
+            self.nodo_arrastre_iniciado()
         except Exception as e:
             print(f"Error registrando movimiento iniciado: {e}")
     
@@ -586,6 +714,8 @@ class EditorController(QObject):
             print(f"Error registrando movimiento finalizado: {e}")
         finally:
             self.movimiento_actual = None
+            # NUEVO: Terminar arrastre para cambiar cursor
+            self.nodo_arrastre_terminado()
     
     def deshacer_movimiento(self):
         """Deshace el último movimiento (Ctrl+Z)"""
@@ -847,6 +977,13 @@ class EditorController(QObject):
 
         # Crear nuevo NodoItem
         nodo_item = NodoItem(nodo, size=size, editor=self)
+
+        # CONEXIÓN DE SEÑALES HOVER - NUEVO
+        try:
+            nodo_item.hover_entered.connect(self.nodo_hover_entered)
+            nodo_item.hover_leaved.connect(self.nodo_hover_leaved)
+        except Exception as e:
+            print(f"Error conectando señales hover: {e}")
 
         # Flags básicos: seleccionable y focusable siempre; movible según modo actual
         try:
@@ -2761,54 +2898,85 @@ class EditorController(QObject):
             self.keyPressEvent(event)
             return True
         
+        # Detectar movimiento del ratón para actualizar cursor dinámicamente
+        if event.type() == QEvent.MouseMove:
+            # Solo actualizar si estamos en modo por defecto
+            if self.modo_actual is None:
+                # Verificar si hay nodos en la posición actual
+                pos = self.view.marco_trabajo.mapToScene(event.pos())
+                items = self.scene.items(pos)
+                hay_nodo = any(isinstance(it, NodoItem) for it in items)
+                
+                # Si el estado de hover cambia, actualizar
+                if hay_nodo and not self._cursor_sobre_nodo:
+                    # El ratón acaba de entrar en un nodo
+                    self._cursor_sobre_nodo = True
+                    self._actualizar_cursor()
+                elif not hay_nodo and self._cursor_sobre_nodo:
+                    # El ratón acaba de salir de un nodo
+                    self._cursor_sobre_nodo = False
+                    self._actualizar_cursor()
+        
         # Detectar click izquierdo en el viewport
         if event.type() == QEvent.MouseButtonPress:
             # Mapear a escena
             pos = self.view.marco_trabajo.mapToScene(event.pos())
             
             # PRIMERO: Si estamos en modo ruta o modo colocar, NO manejar el clic aquí
-            # Los controladores respectivos manejarán los clics a través de su eventFilter
             if self.modo_actual in ["ruta", "colocar"]:
-                return False  # Dejar que el controlador respectivo maneje el clic
+                return False
             
-            # SEGUNDO: Comportamiento normal (solo si NO estamos en modo ruta o colocar)
+            # SEGUNDO: Comportamiento normal
             items = self.scene.items(pos)
             if not any(isinstance(it, NodoItem) for it in items):
-                # deseleccionar items de la escena
+                # Click fuera de nodo
+                print("CLICK FUERA DE NODO")
+                
+                # Resetear estado de hover
+                if self._cursor_sobre_nodo:
+                    self._cursor_sobre_nodo = False
+                    self._actualizar_cursor()
+                
+                # Si estábamos arrastrando, terminar el arrastre
+                if self._arrastrando_nodo:
+                    self.nodo_arrastre_terminado()
+                
+                # Resto del código existente...
                 try:
                     for it in self.scene.selectedItems():
                         it.setSelected(False)
                 except Exception:
-                        pass
-                    
-                    # deseleccionar lista de nodos
-                try:
-                        self.view.nodosList.clearSelection()
-                except Exception:
-                        pass
-                    
-                    # deseleccionar lista de rutas y limpiar highlights
-                try:
-                        if hasattr(self.view, "rutasList"):
-                            self.view.rutasList.clearSelection()
-                except Exception:
-                        pass
-                    
-                self._clear_highlight_lines()
-                    
-                    # limpiar propertiesTable
-                try:
-                        self.view.propertiesTable.clear()
-                        self.view.propertiesTable.setRowCount(0)
-                        self.view.propertiesTable.setColumnCount(2)
-                        self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
-                except Exception:
-                        pass
-                    
-                    # Restaurar colores de nodos
+                    pass
+                
                 for item in self.scene.items():
-                        if isinstance(item, NodoItem):
-                            item.set_normal_color()
+                    if isinstance(item, NodoItem):
+                        item.setZValue(1)
+                    
+                try:
+                    self.view.nodosList.clearSelection()
+                except Exception:
+                    pass
+                
+                try:
+                    if hasattr(self.view, "rutasList"):
+                        self.view.rutasList.clearSelection()
+                except Exception:
+                    pass
+                
+                self._clear_highlight_lines()
+                
+                try:
+                    self.view.propertiesTable.clear()
+                    self.view.propertiesTable.setRowCount(0)
+                    self.view.propertiesTable.setColumnCount(2)
+                    self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
+                except Exception:
+                    pass
+                
+                for item in self.scene.items():
+                    if isinstance(item, NodoItem):
+                        item.set_normal_color()
+        
         return False
 
     def diagnosticar_estado_proyecto(self):
@@ -3638,4 +3806,7 @@ class EditorController(QObject):
         
         print("✓ Referencias del proyecto actualizadas en todos los controladores")
 
-    
+    def forzar_actualizacion_cursor(self):
+        """Fuerza la actualización del cursor, útil para debug"""
+        print("=== FORZANDO ACTUALIZACIÓN DE CURSOR ===")
+        self._actualizar_cursor()

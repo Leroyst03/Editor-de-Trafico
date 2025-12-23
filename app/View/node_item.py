@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import QGraphicsObject, QMessageBox, QGraphicsItem
 from PyQt5.QtCore import QRectF, Qt, pyqtSignal, QPointF
-from PyQt5.QtGui import QBrush, QPainter, QPen, QColor, QFont
+from PyQt5.QtGui import QBrush, QPainter, QPen, QColor, QFont, QCursor
 from Model.Nodo import Nodo
 
 class NodoItem(QGraphicsObject):
@@ -8,6 +8,9 @@ class NodoItem(QGraphicsObject):
     movimiento_iniciado = pyqtSignal(object, int, int)  # Señal para inicio de movimiento: (nodo, x_inicial, y_inicial)
     # NUEVA SEÑAL: cuando el nodo es seleccionado
     nodo_seleccionado = pyqtSignal(object)
+    # NUEVAS SEÑALES: para eventos hover
+    hover_entered = pyqtSignal(object)  # Emite self cuando el ratón entra
+    hover_leaved = pyqtSignal(object)   # Emite self cuando el ratón sale
 
     def __init__(self, nodo: Nodo, size=20, editor=None):
         super().__init__()
@@ -36,6 +39,9 @@ class NodoItem(QGraphicsObject):
         # ItemIsMovable se activa/desactiva desde EditorController según el modo
         self.setAcceptedMouseButtons(Qt.LeftButton)
         self.setZValue(self.z_value_original)
+
+        # NUEVO: Activar eventos hover
+        self.setAcceptHoverEvents(True)
 
         # Estado interno para detectar arrastre
         self._dragging = False
@@ -196,16 +202,23 @@ class NodoItem(QGraphicsObject):
             super().mouseDoubleClickEvent(event)
 
     def mousePressEvent(self, event):
+        print(f"MousePress en nodo {self.nodo.get('id')}")
+        
         # Marcar inicio de arrastre si el item es movible
         if event.button() == Qt.LeftButton and (self.flags() & QGraphicsObject.ItemIsMovable):
             self._dragging = True
-            # Guardar posición inicial al iniciar el arrastre
+            # Guardar posición inicial
             scene_pos = self.scenePos()
             x_centro = int(scene_pos.x() + self.size / 2)
             y_centro = int(scene_pos.y() + self.size / 2)
             self._posicion_inicial = (x_centro, y_centro)
             
-            # Emitir señal de movimiento iniciado
+            # Notificar al editor que se inició el arrastre
+            if self.editor:
+                print("Llamando a nodo_arrastre_iniciado")
+                self.editor.nodo_arrastre_iniciado()
+            
+            # También para el historial
             if self.editor and hasattr(self.editor, 'registrar_movimiento_iniciado'):
                 self.editor.registrar_movimiento_iniciado(self, x_centro, y_centro)
         
@@ -296,23 +309,44 @@ class NodoItem(QGraphicsObject):
             return super().itemChange(change, value)
     
     def mouseReleaseEvent(self, event):
+        print(f"MouseRelease en nodo {self.nodo.get('id')}")
+        
         try:
             if self._dragging and self._posicion_inicial:
                 p = self.scenePos()
                 cx = int(p.x() + self.size / 2)
                 cy = int(p.y() + self.size / 2)
                 
-                # Verificar si realmente hubo movimiento
+                # Verificar si hubo movimiento
                 x_inicial, y_inicial = self._posicion_inicial
                 if cx != x_inicial or cy != y_inicial:
-                    # Registrar movimiento finalizado en el editor
                     if self.editor and hasattr(self.editor, 'registrar_movimiento_finalizado'):
                         self.editor.registrar_movimiento_finalizado(self, x_inicial, y_inicial, cx, cy)
                 
                 self._posicion_inicial = None
                 
         except Exception as err:
-            print("Error al procesar mouseReleaseEvent:", err)
+            print(f"Error en mouseReleaseEvent: {err}")
         finally:
             self._dragging = False
+            # Notificar al editor que terminó el arrastre
+            if self.editor:
+                print("Llamando a nodo_arrastre_terminado")
+                self.editor.nodo_arrastre_terminado()
             super().mouseReleaseEvent(event)
+    
+    def hoverEnterEvent(self, event):
+        """Cuando el ratón entra en el nodo"""
+        print(f"HoverEnter en nodo {self.nodo.get('id')}")
+        if self.editor:
+            self.editor.nodo_hover_entered(self)
+        self.hover_entered.emit(self)
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event):
+        """Cuando el ratón sale del nodo"""
+        print(f"HoverLeave en nodo {self.nodo.get('id')}")
+        if self.editor:
+            self.editor.nodo_hover_leaved(self)
+        self.hover_leaved.emit(self)
+        super().hoverLeaveEvent(event)
