@@ -1598,6 +1598,7 @@ class EditorController(QObject):
     def mostrar_propiedades_ruta(self, ruta):
         """
         Muestra la ruta en propertiesTable con el formato:
+        Nombre: nombre_ruta
         Origen: id_origen
         Destino: id_destino  
         visita: [id1, id2, id3]
@@ -1622,8 +1623,9 @@ class EditorController(QObject):
         self.view.propertiesTable.setColumnCount(2)
         self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
 
-        # Mostrar solo origen, destino y visita
+        # Mostrar nombre, origen, destino y visita
         propiedades = [
+            ("Nombre", ruta_dict.get("nombre", "Ruta")),
             ("Origen", self._obtener_id_nodo(ruta_dict.get("origen"))),
             ("Destino", self._obtener_id_nodo(ruta_dict.get("destino"))),
             ("visita", self._obtener_ids_visita(ruta_dict.get("visita", [])))
@@ -1699,12 +1701,14 @@ class EditorController(QObject):
             print(f"Actualizando ruta - Campo: {campo}, Valor: {texto}")
             
             # Procesar según el campo
-            if campo == "origen":
+            if campo == "nombre":
+                ruta_dict["nombre"] = texto
+            elif campo == "origen":
                 try:
                     nuevo_id = int(texto)
                     # Buscar nodo existente o crear uno temporal
                     nodo_existente = next((n for n in getattr(self.proyecto, "nodos", []) 
-                                         if self._obtener_id_nodo(n) == nuevo_id), None)
+                                        if self._obtener_id_nodo(n) == nuevo_id), None)
                     if nodo_existente:
                         ruta_dict["origen"] = nodo_existente
                     else:
@@ -1718,7 +1722,7 @@ class EditorController(QObject):
                     nuevo_id = int(texto)
                     # Buscar nodo existente o crear uno temporal
                     nodo_existente = next((n for n in getattr(self.proyecto, "nodos", []) 
-                                         if self._obtener_id_nodo(n) == nuevo_id), None)
+                                        if self._obtener_id_nodo(n) == nuevo_id), None)
                     if nodo_existente:
                         ruta_dict["destino"] = nodo_existente
                     else:
@@ -1742,7 +1746,7 @@ class EditorController(QObject):
                                 nodo_id = int(id_str)
                                 # Buscar nodo existente
                                 nodo_existente = next((n for n in getattr(self.proyecto, "nodos", []) 
-                                                     if self._obtener_id_nodo(n) == nodo_id), None)
+                                                    if self._obtener_id_nodo(n) == nodo_id), None)
                                 if nodo_existente:
                                     nueva_visita.append(nodo_existente)
                                 else:
@@ -1759,6 +1763,9 @@ class EditorController(QObject):
             # Normalizar y actualizar referencia en proyecto.rutas usando el método del proyecto
             self._normalize_route_nodes(ruta_dict)
             self.proyecto.actualizar_ruta(self.ruta_actual_idx, ruta_dict)
+            
+            # Actualizar el texto en la lista lateral de rutas
+            self._actualizar_widget_ruta_en_lista(self.ruta_actual_idx)
             
             print(f"Ruta actualizada exitosamente")
             
@@ -3148,14 +3155,17 @@ class EditorController(QObject):
 
             origen_id = origen.get("id", "?") if isinstance(origen, dict) else str(origen)
             destino_id = destino.get("id", "?") if isinstance(destino, dict) else str(destino)
-
-            # Texto más compacto
-            item_text = f"R{idx+1}: {origen_id}→{destino_id}"
+            
+            # Obtener el nombre de la ruta, por defecto "Ruta"
+            nombre_ruta = ruta_dict.get("nombre", "Ruta")
+            
+            # Texto en formato: "nombre: id_origen -> id_destino"
+            item_text = f"{nombre_ruta}: {origen_id}→{destino_id}"
             
             item = QListWidgetItem()
             item.setData(Qt.UserRole, ruta_dict)
             item.setFlags(item.flags() | Qt.ItemIsSelectable | Qt.ItemIsEnabled)
-            item.setSizeHint(QSize(0, 24))  # Altura reducida a 24px
+            item.setSizeHint(QSize(0, 24))
             
             widget = RutaListItemWidget(
                 idx, 
@@ -3365,6 +3375,20 @@ class EditorController(QObject):
             item = self.view.rutasList.item(i)
             widget = self.view.rutasList.itemWidget(item)
             if widget and hasattr(widget, 'ruta_index') and widget.ruta_index == ruta_index:
+                # Actualizar el texto del widget
+                ruta = self.proyecto.rutas[ruta_index]
+                try:
+                    ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+                except Exception:
+                    ruta_dict = ruta
+                self._normalize_route_nodes(ruta_dict)
+                origen = ruta_dict.get("origen")
+                destino = ruta_dict.get("destino")
+                origen_id = origen.get("id", "?") if isinstance(origen, dict) else str(origen)
+                destino_id = destino.get("id", "?") if isinstance(destino, dict) else str(destino)
+                nombre_ruta = ruta_dict.get("nombre", "Ruta")
+                item_text = f"{nombre_ruta}: {origen_id}→{destino_id}"
+                widget.lbl_texto.setText(item_text)
                 widget.set_visible(self.visibilidad_rutas.get(ruta_index, True))
                 break
     
