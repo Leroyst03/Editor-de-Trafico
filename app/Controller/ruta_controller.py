@@ -11,7 +11,7 @@ class RutaController(QObject):
         self.editor = editor
         self.activo = False
 
-        # Estado de la ruta en construcción (como en la versión anterior)
+        # Estado de la ruta en construcción
         self._nodes_seq = []     # lista de objetos Nodo (orden)
         self._lines = []         # QGraphicsLineItem temporales (verdes)
         self._last_item = None   # último NodoItem visual añadido
@@ -31,9 +31,9 @@ class RutaController(QObject):
             print("- Haz clic en el botón de ruta nuevamente para terminar")
 
     def desactivar(self):
-        """Desactiva el modo de creación de rutas - VERSIÓN SIMPLIFICADA COMO LA ANTERIOR"""
+        """Desactiva el modo de creación de rutas"""
         if self.activo:
-            # Finalizar la ruta en construcción (si procede) - EXACTAMENTE COMO LA VERSIÓN ANTERIOR
+            # Finalizar la ruta en construcción (si procede)
             self._finalize_route()
             self.view.marco_trabajo.viewport().removeEventFilter(self)
             self.activo = False
@@ -78,10 +78,9 @@ class RutaController(QObject):
                 return True
         return False
 
-    # --- Métodos de la versión anterior que funcionaban ---
     def _create_and_add_node(self, x, y):
-        """Crea un nuevo nodo y lo añade a la ruta (CORREGIDO para incluir botón de visibilidad)"""
-        # Crear el nodo en el modelo
+        """Crea un nuevo nodo y lo añade a la ruta"""
+        # Crear el nodo en el modelo (esto emitirá la señal nodo_agregado)
         nodo = self.proyecto.agregar_nodo(x, y)
         
         # Asegurar que el nodo tenga campo "objetivo"
@@ -103,48 +102,18 @@ class RutaController(QObject):
             except Exception:
                 pass
 
-        # --- CORRECCIÓN CRÍTICA: Usar el método del editor para inicializar visibilidad ---
-        print(f"DEBUG RutaController: Inicializando visibilidad para nodo nuevo {nodo.get('id')}")
-        self.editor._inicializar_nodo_visibilidad(nodo, agregar_a_lista=True)
-        
         # Añadir a la secuencia de la ruta y dibujar segmento si hay anterior
         self._append_node_to_route(nodo, nodo_item)
 
     def _add_existing_node(self, nodo_item):
-        """Añade un nodo existente a la ruta (CORREGIDO para asegurar visibilidad)"""
+        """Añade un nodo existente a la ruta"""
         nodo = nodo_item.nodo
-        
-        # --- CORRECCIÓN: Asegurar que el nodo esté en la lista lateral con widget ---
-        # Verificar si el nodo ya está inicializado en el sistema de visibilidad
-        nodo_id = nodo.get('id')
-        
-        if nodo_id is not None:
-            # Verificar si el nodo ya está en el sistema de visibilidad del editor
-            if nodo_id not in self.editor.visibilidad_nodos:
-                print(f"DEBUG RutaController: Nodo existente {nodo_id} no tiene visibilidad, inicializando...")
-                self.editor._inicializar_nodo_visibilidad(nodo, agregar_a_lista=True)
-            else:
-                # El nodo ya está en el sistema, solo verificar que esté en la lista lateral
-                print(f"DEBUG RutaController: Nodo existente {nodo_id} ya tiene visibilidad")
-                
-                # Verificar si ya está en la lista lateral
-                en_lista = False
-                for i in range(self.view.nodosList.count()):
-                    item = self.view.nodosList.item(i)
-                    widget = self.view.nodosList.itemWidget(item)
-                    if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo_id:
-                        en_lista = True
-                        break
-                
-                if not en_lista:
-                    print(f"DEBUG RutaController: Nodo {nodo_id} no está en lista lateral, agregando...")
-                    self.editor._inicializar_nodo_visibilidad(nodo, agregar_a_lista=True)
         
         # Añadir a la secuencia de la ruta
         self._append_node_to_route(nodo, nodo_item)
 
     def _append_node_to_route(self, nodo, nodo_item):
-        """Añade un nodo a la secuencia de la ruta y dibuja líneas (versión anterior)"""
+        """Añade un nodo a la secuencia de la ruta y dibuja líneas"""
         # Primer nodo: solo añadir y marcar
         if not self._nodes_seq:
             self._nodes_seq.append(nodo)
@@ -225,7 +194,7 @@ class RutaController(QObject):
                 self._lines.append(line)
 
     def _finalize_route(self):
-        """Finaliza la ruta en construcción: guarda la ruta en el modelo (versión anterior mejorada)"""
+        """Finaliza la ruta en construcción: guarda la ruta en el modelo"""
         # Si no hay suficientes nodos, limpiar temporales y salir
         if len(self._nodes_seq) < 2:
             print("⚠ No se puede guardar: ruta necesita al menos 2 nodos")
@@ -254,11 +223,9 @@ class RutaController(QObject):
         destino = ruta_nodes[-1]
         visita = ruta_nodes[1:-1] if len(ruta_nodes) > 2 else []
 
-        # Guardar en proyecto.rutas como dict (compatible con Proyecto.guardar)
+        # Guardar en proyecto.rutas usando el método agregar_ruta (que emitirá la señal)
         ruta_dict = {"origen": origen, "visita": visita, "destino": destino}
-        if not hasattr(self.proyecto, "rutas") or self.proyecto.rutas is None:
-            self.proyecto.rutas = []
-        self.proyecto.rutas.append(ruta_dict)
+        self.proyecto.agregar_ruta(ruta_dict)
 
         # Mostrar coordenadas en metros
         x_origen_m = self.editor.pixeles_a_metros(origen.get('X', 0))
@@ -271,15 +238,6 @@ class RutaController(QObject):
         # Limpiar líneas temporales y estado de construcción
         self._clear_temp_lines()
         self._clear_state()
-
-        # Delegar el dibujo al editor (que debe limpiar y redibujar todo)
-        try:
-            if hasattr(self.editor, "_dibujar_rutas"):
-                self.editor._dibujar_rutas()
-            if hasattr(self.editor, "_mostrar_rutas_lateral"):
-                self.editor._mostrar_rutas_lateral()
-        except Exception as e:
-            print(f"Error actualizando UI: {e}")
 
     def _clear_temp_lines(self):
         """Elimina todas las líneas temporales"""

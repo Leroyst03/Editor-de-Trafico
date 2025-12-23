@@ -1,17 +1,25 @@
 from PyQt5.QtWidgets import QGraphicsObject, QMessageBox, QGraphicsItem
 from PyQt5.QtCore import QRectF, Qt, pyqtSignal, QPointF
-from PyQt5.QtGui import QBrush, QPainter, QPen, QColor, QFont
+from PyQt5.QtGui import QBrush, QPainter, QPen, QColor, QFont, QCursor
 from Model.Nodo import Nodo
 
 class NodoItem(QGraphicsObject):
     moved = pyqtSignal(object)  # emite (id, x, y) o el objeto nodo según preferencia
     movimiento_iniciado = pyqtSignal(object, int, int)  # Señal para inicio de movimiento: (nodo, x_inicial, y_inicial)
+    # NUEVA SEÑAL: cuando el nodo es seleccionado
+    nodo_seleccionado = pyqtSignal(object)
+    # NUEVAS SEÑALES: para eventos hover
+    hover_entered = pyqtSignal(object)  # Emite self cuando el ratón entra
+    hover_leaved = pyqtSignal(object)   # Emite self cuando el ratón sale
 
     def __init__(self, nodo: Nodo, size=20, editor=None):
         super().__init__()
         self.nodo = nodo
         self.size = size
         self.editor = editor
+        
+        # Valor z original para restaurar después
+        self.z_value_original = 1
 
         # Enviar cambios de geometría para que itemChange reciba ItemPositionHasChanged
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
@@ -30,7 +38,10 @@ class NodoItem(QGraphicsObject):
         self.setFlag(QGraphicsObject.ItemIsFocusable, True)
         # ItemIsMovable se activa/desactiva desde EditorController según el modo
         self.setAcceptedMouseButtons(Qt.LeftButton)
-        self.setZValue(1)
+        self.setZValue(self.z_value_original)
+
+        # NUEVO: Activar eventos hover
+        self.setAcceptHoverEvents(True)
 
         # Estado interno para detectar arrastre
         self._dragging = False
@@ -191,16 +202,23 @@ class NodoItem(QGraphicsObject):
             super().mouseDoubleClickEvent(event)
 
     def mousePressEvent(self, event):
+        print(f"MousePress en nodo {self.nodo.get('id')}")
+        
         # Marcar inicio de arrastre si el item es movible
         if event.button() == Qt.LeftButton and (self.flags() & QGraphicsObject.ItemIsMovable):
             self._dragging = True
-            # Guardar posición inicial al iniciar el arrastre
+            # Guardar posición inicial
             scene_pos = self.scenePos()
             x_centro = int(scene_pos.x() + self.size / 2)
             y_centro = int(scene_pos.y() + self.size / 2)
             self._posicion_inicial = (x_centro, y_centro)
             
-            # Emitir señal de movimiento iniciado
+            # Notificar al editor que se inició el arrastre
+            if self.editor:
+                print("Llamando a nodo_arrastre_iniciado")
+                self.editor.nodo_arrastre_iniciado()
+            
+            # También para el historial
             if self.editor and hasattr(self.editor, 'registrar_movimiento_iniciado'):
                 self.editor.registrar_movimiento_iniciado(self, x_centro, y_centro)
         
@@ -208,44 +226,127 @@ class NodoItem(QGraphicsObject):
 
     def itemChange(self, change, value):
         try:
+            if change == QGraphicsObject.ItemSelectedChange:
+                # Cuando el nodo es seleccionado
+                if value:  # Si se está seleccionando
+                    # Guardar el valor z original
+                    self.z_value_original = self.zValue()
+                    # Establecer un valor z muy alto para que esté encima de todos
+                    self.setZValue(1000)
+                    # Emitir señal de nodo seleccionado
+                    if self.editor:
+                        self.nodo_seleccionado.emit(self)
+                else:  # Si se está deseleccionando
+                    # Restaurar el valor z original
+                    self.setZValue(self.z_value_original)
+            
+            # CRÍTICO: Emitir moved DURANTE el arrastre (ItemPositionChange)
+            if change == QGraphicsObject.ItemPositionChange:
+                # Obtener la nueva posición propuesta
+                new_pos = value
+                cx = int(new_pos.x() + self.size / 2)
+                cy = int(new_pos.y() + self.size / 2)
+                
+                # DEBUG: Verificar estructura del nodo
+                if hasattr(self.nodo, "__dict__"):
+                    print(f"DEBUG NodoItem: nodo es objeto con id={getattr(self.nodo, 'id', 'NO ID')}")
+                elif isinstance(self.nodo, dict):
+                    print(f"DEBUG NodoItem: nodo es dict con id={self.nodo.get('id', 'NO ID')}")
+                else:
+                    print(f"DEBUG NodoItem: nodo tipo={type(self.nodo)}")
+                
+                # Actualizar modelo temporalmente durante el arrastre
+                if hasattr(self.nodo, "set_posicion"):
+                    self.nodo.set_posicion(cx, cy)
+                elif hasattr(self.nodo, "update"):
+                    # Asegurar que el nodo tenga ID antes de actualizar
+                    if isinstance(self.nodo, dict):
+                        self.nodo["X"] = cx
+                        self.nodo["Y"] = cy
+                        print(f"DEBUG NodoItem: Actualizado dict nodo {self.nodo.get('id')} a ({cx}, {cy})")
+                    else:
+                        # Si es un objeto Nodo, usar update
+                        self.nodo.update({"X": cx, "Y": cy})
+                        print(f"DEBUG NodoItem: Actualizado objeto nodo con update")
+                else:
+                    # Fallback: intentar establecer directamente
+                    try:
+                        setattr(self.nodo, "X", cx)
+                        setattr(self.nodo, "Y", cy)
+                        print(f"DEBUG NodoItem: Actualizado con setattr")
+                    except:
+                        pass
+                
+                # EMITIR SEÑAL DURANTE EL ARRASTRE - ESTO ES CLAVE
+                print(f"DEBUG NodoItem: Emitiendo moved para nodo_item")
+                self.moved.emit(self)
+                return value
+                
             if change == QGraphicsObject.ItemPositionHasChanged:
-                # Solo actualizar al finalizar el movimiento
+                # Al finalizar el movimiento
                 p = self.scenePos()
                 cx = int(p.x() + self.size / 2)
                 cy = int(p.y() + self.size / 2)
                 
+                print(f"DEBUG NodoItem: ItemPositionHasChanged - posición final ({cx}, {cy})")
+                
                 # Actualizar modelo
                 if hasattr(self.nodo, "set_posicion"):
                     self.nodo.set_posicion(cx, cy)
-                else:
-                    self.nodo.update({"X": cx, "Y": cy})
+                elif hasattr(self.nodo, "update"):
+                    if isinstance(self.nodo, dict):
+                        self.nodo["X"] = cx
+                        self.nodo["Y"] = cy
+                    else:
+                        self.nodo.update({"X": cx, "Y": cy})
                 
-                # Emitir señal UNA sola vez
+                # Emitir señal al final también
                 self.moved.emit(self)
                 
             return super().itemChange(change, value)
         except Exception as err:
             print("Error en itemChange:", err)
             return super().itemChange(change, value)
-
+    
     def mouseReleaseEvent(self, event):
+        print(f"MouseRelease en nodo {self.nodo.get('id')}")
+        
         try:
             if self._dragging and self._posicion_inicial:
                 p = self.scenePos()
                 cx = int(p.x() + self.size / 2)
                 cy = int(p.y() + self.size / 2)
                 
-                # Verificar si realmente hubo movimiento
+                # Verificar si hubo movimiento
                 x_inicial, y_inicial = self._posicion_inicial
                 if cx != x_inicial or cy != y_inicial:
-                    # Registrar movimiento finalizado en el editor
                     if self.editor and hasattr(self.editor, 'registrar_movimiento_finalizado'):
                         self.editor.registrar_movimiento_finalizado(self, x_inicial, y_inicial, cx, cy)
                 
                 self._posicion_inicial = None
                 
         except Exception as err:
-            print("Error al procesar mouseReleaseEvent:", err)
+            print(f"Error en mouseReleaseEvent: {err}")
         finally:
             self._dragging = False
+            # Notificar al editor que terminó el arrastre
+            if self.editor:
+                print("Llamando a nodo_arrastre_terminado")
+                self.editor.nodo_arrastre_terminado()
             super().mouseReleaseEvent(event)
+    
+    def hoverEnterEvent(self, event):
+        """Cuando el ratón entra en el nodo"""
+        print(f"HoverEnter en nodo {self.nodo.get('id')}")
+        if self.editor:
+            self.editor.nodo_hover_entered(self)
+        self.hover_entered.emit(self)
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event):
+        """Cuando el ratón sale del nodo"""
+        print(f"HoverLeave en nodo {self.nodo.get('id')}")
+        if self.editor:
+            self.editor.nodo_hover_leaved(self)
+        self.hover_leaved.emit(self)
+        super().hoverLeaveEvent(event)

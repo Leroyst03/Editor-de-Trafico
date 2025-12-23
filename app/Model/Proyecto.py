@@ -1,17 +1,20 @@
 import json
 from Model.Nodo import Nodo
+from PyQt5.QtCore import QObject, pyqtSignal
 
-class Proyecto:
+class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
+    # Señales para notificar cambios
+    nodo_modificado = pyqtSignal(object)  # Emite el nodo modificado
+    ruta_modificada = pyqtSignal(object)  # Emite la ruta modificada
+    proyecto_cambiado = pyqtSignal()      # Cambio general en el proyecto
+    nodo_agregado = pyqtSignal(object)   # Nuevo: nodo agregado
+    ruta_agregada = pyqtSignal(object)   # Nuevo: ruta agregada
+    
     def __init__(self, mapa=None, nodos=None, rutas=None):
+        super().__init__()
         self.mapa = mapa
         self.nodos = nodos if nodos is not None else []
         self.rutas = rutas if rutas is not None else []
-
-    def nuevo(self, mapa):
-        """Inicializa un proyecto nuevo con un mapa vacío."""
-        self.mapa = mapa
-        self.nodos = []
-        self.rutas = []
 
     def agregar_nodo(self, x, y):
         """Crea un nodo con atributos iniciales y lo añade al proyecto."""
@@ -39,14 +42,58 @@ class Proyecto:
         }
         nodo = Nodo(datos)
         self.nodos.append(nodo)
+        
+        # Notificar que se agregó un nodo
+        self.nodo_agregado.emit(nodo)
+        self.proyecto_cambiado.emit()
         return nodo
 
     def actualizar_nodo(self, nodo_actualizado: dict):
         """Actualiza un nodo existente con los datos proporcionados."""
         for nodo in self.nodos:
             if nodo.get("id") == nodo_actualizado.get("id"):
-                nodo.update(nodo_actualizado)
+                # Actualizar solo las claves proporcionadas
+                for key, value in nodo_actualizado.items():
+                    if key != "id":  # No actualizar el ID
+                        if hasattr(nodo, 'update'):
+                            nodo.update({key: value})
+                        else:
+                            setattr(nodo, key, value)
+                
+                # Notificar que el nodo fue modificado
+                self.nodo_modificado.emit(nodo)
+                self.proyecto_cambiado.emit()
                 return nodo
+        return None
+
+    def agregar_ruta(self, ruta_dict):
+        """Agrega una ruta y notifica el cambio."""
+        if not hasattr(self, "rutas") or self.rutas is None:
+            self.rutas = []
+        
+        self.rutas.append(ruta_dict)
+        # Notificar que se agregó una ruta
+        self.ruta_agregada.emit(ruta_dict)
+        self.proyecto_cambiado.emit()
+        return ruta_dict
+
+    def actualizar_ruta(self, ruta_index, ruta_dict):
+        """Actualiza una ruta y notifica el cambio."""
+        if 0 <= ruta_index < len(self.rutas):
+            self.rutas[ruta_index] = ruta_dict
+            # Notificar que la ruta fue modificada
+            self.ruta_modificada.emit(ruta_dict)
+            self.proyecto_cambiado.emit()
+            return True
+        return False
+
+    def eliminar_ruta(self, ruta_index):
+        """Elimina una ruta y notifica el cambio."""
+        if 0 <= ruta_index < len(self.rutas):
+            ruta_eliminada = self.rutas.pop(ruta_index)
+            # Notificar que se eliminó una ruta
+            self.proyecto_cambiado.emit()
+            return ruta_eliminada
         return None
 
     def guardar(self, ruta_archivo):

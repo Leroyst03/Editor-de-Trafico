@@ -27,7 +27,7 @@ class ColocarController(QObject):
         if obj is self.view.marco_trabajo.viewport() and event.type() == QEvent.MouseButtonPress:
             if event.button() == Qt.LeftButton and self.proyecto:
                 pos = self.view.marco_trabajo.mapToScene(event.pos())
-                # Crear nodo en el modelo
+                # Crear nodo en el modelo (esto emitirá la señal nodo_agregado)
                 nodo = self.proyecto.agregar_nodo(int(pos.x()), int(pos.y()))
 
                 # Crear NodoItem usando helper del editor si existe
@@ -42,35 +42,8 @@ class ColocarController(QObject):
                     except Exception:
                         pass
 
-                # AÑADIR A LA LISTA LATERAL USANDO EL SISTEMA DEL EDITOR
-                print(f"DEBUG ColocarController: Agregando nodo ID {nodo.get('id')} a lista lateral")
-                
-                # Usar el método centralizado del editor para inicializar visibilidad
-                if hasattr(self.editor, '_inicializar_nodo_visibilidad'):
-                    try:
-                        self.editor._inicializar_nodo_visibilidad(nodo, agregar_a_lista=True)
-                        print(f"✓ Nodo {nodo.get('id')} agregado con widget de visibilidad")
-                    except Exception as e:
-                        print(f"✗ Error al inicializar visibilidad: {e}")
-                        # Fallback: agregar manualmente
-                        # Mostrar en metros
-                        x_m = self.editor.pixeles_a_metros(nodo.get('X', 0))
-                        y_m = self.editor.pixeles_a_metros(nodo.get('Y', 0))
-                        item = QListWidgetItem(f"ID {nodo.get('id')} - ({x_m:.2f}, {y_m:.2f})")
-                        item.setData(Qt.UserRole, nodo)
-                        self.view.nodosList.addItem(item)
-                else:
-                    # Fallback si no existe el método
-                    # Mostrar en metros
-                    x_m = self.editor.pixeles_a_metros(nodo.get('X', 0))
-                    y_m = self.editor.pixeles_a_metros(nodo.get('Y', 0))
-                    item = QListWidgetItem(f"ID {nodo.get('id')} - ({x_m:.2f}, {y_m:.2f})")
-                    item.setData(Qt.UserRole, nodo)
-                    self.view.nodosList.addItem(item)
-
-                # También llamar a actualizar rutas si existen
-                if hasattr(self.editor, '_dibujar_rutas'):
-                    self.editor._dibujar_rutas()
+                # El editor ya manejará la notificación del nodo agregado
+                # a través de las señales conectadas
 
                 # Mostrar en metros
                 x_m = self.editor.pixeles_a_metros(nodo.get('X'))

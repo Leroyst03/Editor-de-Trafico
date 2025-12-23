@@ -21,6 +21,12 @@ class MoverController(QObject):
                 if isinstance(item, NodoItem):
                     item.setFlag(item.ItemIsMovable, True)
                     item.setFlag(item.ItemIsFocusable, True)
+                    # Asegurar que la señal moved esté conectada para actualizar rutas
+                    try:
+                        item.moved.disconnect()
+                    except:
+                        pass
+                    item.moved.connect(self.editor.on_nodo_moved)
         except Exception as err:
             print("Error al activar modo mover:", err)
 

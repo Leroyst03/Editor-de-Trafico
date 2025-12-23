@@ -1,9 +1,9 @@
 from PyQt5.QtWidgets import (
     QFileDialog, QGraphicsScene, QGraphicsPixmapItem,
     QButtonGroup, QListWidgetItem,
-    QTableWidgetItem, QHeaderView, QMenu, QMessageBox
+    QTableWidgetItem, QHeaderView, QMenu, QMessageBox, QLabel
 )
-from PyQt5.QtGui import QPixmap, QPen, QColor
+from PyQt5.QtGui import QPixmap, QPen, QColor, QCursor
 from PyQt5.QtCore import Qt, QEvent, QObject, QSize
 from Model.Proyecto import Proyecto
 from Model.ExportadorDB import ExportadorDB
@@ -22,6 +22,13 @@ class EditorController(QObject):
         
         # --- ESCALA GLOBAL: 1 píxel = 0.05 metros ---
         self.ESCALA = 0.05
+
+        # --- NUEVO: Estado del cursor ---
+        self._cursor_sobre_nodo = False
+        self._arrastrando_nodo = False  # Para rastrear si estamos arrastrando un nodo
+
+        if self.proyecto:
+            self._conectar_señales_proyecto()
 
         # --- Inicializar escena con padre ---
         self.scene = QGraphicsScene(self.view.marco_trabajo)
@@ -68,6 +75,8 @@ class EditorController(QObject):
 
         # Estado inicial: modo por defecto (navegación)
         self.view.marco_trabajo.setDragMode(self.view.marco_trabajo.ScrollHandDrag)
+
+        self.scene.selectionChanged.connect(self.manejar_seleccion_nodo)
 
         self._changing_selection = False
         self._updating_ui = False
@@ -122,9 +131,118 @@ class EditorController(QObject):
             self.inicializar_visibilidad()
             # Asegurar que los botones estén inicializados
             self._actualizar_lista_nodos_con_widgets()
+        
+        # --- NUEVO: Actualizar descripción del modo inicial ---
+        self.actualizar_descripcion_modo()
+
+        # Asegurar que el cursor inicial sea correcto
+        self._actualizar_cursor()
+
+    # --- MÉTODOS DE CONVERSIÓN PÍXELES-METROS ---
+    def pixeles_a_metros(self, valor_px):
+        """Convierte píxeles a metros usando la escala global."""
+        return valor_px * self.ESCALA
+    
+    def metros_a_pixeles(self, valor_m):
+        """Convierte metros a píxeles usando la escala global."""
+        return valor_m / self.ESCALA
+    
+    def format_coords_m(self, x_px, y_px):
+        """Formatea coordenadas en metros con 2 decimales."""
+        x_m = self.pixeles_a_metros(x_px)
+        y_m = self.pixeles_a_metros(y_px)
+        return f"{x_m:.2f}, {y_m:.2f}"
+
+    # --- MÉTODOS PARA GESTIÓN DE PUNTEROS ---
+    def _actualizar_cursor(self, cursor_tipo=None):
+        """
+        Actualiza el cursor del viewport según el modo y situación.
+        
+        Args:
+            cursor_tipo: Puede ser None (auto-determinar) o un valor de Qt.CursorShape
+        """
+        try:
+            # Depuración para entender qué está pasando
+            debug_info = f"DEBUG Cursor: modo={self.modo_actual}, sobre_nodo={self._cursor_sobre_nodo}, arrastrando={self._arrastrando_nodo}"
+            print(debug_info)
+            
+            if cursor_tipo is not None:
+                # Si se especifica un cursor específico, usarlo
+                self.view.marco_trabajo.viewport().setCursor(QCursor(cursor_tipo))
+                print(f"Cursor forzado a: {cursor_tipo}")
+                return
+            
+            # Determinar cursor según el modo actual y estado
+            if self.modo_actual is None:
+                # MODO POR DEFECTO (navegación)
+                if self._cursor_sobre_nodo:
+                    # ABSOLUTAMENTE SIEMPRE PointingHandCursor cuando está sobre un nodo
+                    cursor = Qt.PointingHandCursor
+                    print("MODO POR DEFECTO: PointingHandCursor (sobre nodo)")
+                else:
+                    # Dejar que Qt maneje el cursor de navegación (ScrollHandDrag)
+                    self.view.marco_trabajo.viewport().unsetCursor()
+                    print("MODO POR DEFECTO: Cursor por defecto de Qt")
+                    return
+                    
+            elif self.modo_actual == "mover":
+                # MODO MOVER
+                if self._arrastrando_nodo:
+                    # Mano cerrada cuando se está arrastrando un nodo
+                    cursor = Qt.ClosedHandCursor
+                    print("MODO MOVER: ClosedHandCursor (arrastrando nodo)")
+                else:
+                    # PointingHandCursor cuando no se está arrastrando
+                    cursor = Qt.PointingHandCursor
+                    print("MODO MOVER: PointingHandCursor")
+                    
+            elif self.modo_actual == "colocar":
+                # MODO COLOCAR VÉRTICE
+                cursor = Qt.ArrowCursor
+                print("MODO COLOCAR: ArrowCursor")
+                
+            elif self.modo_actual == "ruta":
+                # MODO RUTA
+                cursor = Qt.ArrowCursor
+                print("MODO RUTA: ArrowCursor")
+                
+            else:
+                # Cualquier otro modo
+                cursor = Qt.ArrowCursor
+                print("MODO DESCONOCIDO: ArrowCursor")
+            
+            # Aplicar el cursor
+            self.view.marco_trabajo.viewport().setCursor(QCursor(cursor))
+            
+        except Exception as e:
+            print(f"Error al actualizar cursor: {e}")
+
+    def nodo_hover_entered(self, nodo_item):
+        """Cuando el ratón entra en un nodo"""
+        self._cursor_sobre_nodo = True
+        print(f"HOVER ENTRADO: Nodo ID {nodo_item.nodo.get('id')}")
+        self._actualizar_cursor()
+
+    def nodo_hover_leaved(self, nodo_item):
+        """Cuando el ratón sale de un nodo"""
+        self._cursor_sobre_nodo = False
+        print(f"HOVER SALIDO: Nodo ID {nodo_item.nodo.get('id')}")
+        self._actualizar_cursor()
+
+    def nodo_arrastre_iniciado(self):
+        """Cuando se inicia el arrastre de un nodo en modo mover"""
+        if self.modo_actual == "mover":
+            self._arrastrando_nodo = True
+            print("ARRASRE INICIADO: Mano cerrada")
+            self._actualizar_cursor()
+
+    def nodo_arrastre_terminado(self):
+        """Cuando se termina el arrastre de un nodo"""
+        self._arrastrando_nodo = False
+        print("ARRASRE TERMINADO: Mano apuntando")
+        self._actualizar_cursor()
 
     # --- MÉTODOS NUEVOS PARA MANEJO DE PROYECTO ---
-    
     def _actualizar_referencias_proyecto(self, proyecto):
         """Actualiza todas las referencias al proyecto en controladores y subcontroladores"""
         self.proyecto = proyecto
@@ -201,16 +319,30 @@ class EditorController(QObject):
 
     # --- Gestión de modos ---
     def cambiar_modo(self, boton):
+        print(f"\n=== CAMBIANDO MODO: boton={boton.text()} ===")
+        
         # Si el botón ya estaba activado y se hace clic, se desactiva
         if not boton.isChecked():
+            print("Desactivando todos los modos...")
             # Desactivar todos los modos
             self.modo_actual = None
             self.mover_ctrl.desactivar()
             self.colocar_ctrl.desactivar()
             
+            # IMPORTANTE: Desconectar señales de movimiento
+            try:
+                for item in self.scene.items():
+                    if isinstance(item, NodoItem):
+                        try:
+                            item.moved.disconnect()
+                        except:
+                            pass
+            except Exception:
+                pass
+            
             # IMPORTANTE: CORRECCIÓN CRÍTICA - SIEMPRE DESACTIVAR EL CONTROLADOR DE RUTA
             try:
-                self.ruta_ctrl.desactivar()  # ← ESTA ES LA LÍNEA CLAVE QUE FALTABA
+                self.ruta_ctrl.desactivar()
             except Exception as e:
                 print(f"Error al desactivar ruta: {e}")
             
@@ -230,15 +362,26 @@ class EditorController(QObject):
             self.restaurar_colores_nodos()
             
             print("Modo por defecto activado: navegación del mapa y selección")
+            
+            # --- NUEVO: Actualizar descripción del modo ---
+            self.actualizar_descripcion_modo()
+            
+            # --- NUEVO: Resetear estado de arrastre y actualizar cursor ---
+            self._arrastrando_nodo = False
+            self._cursor_sobre_nodo = False
+            print("Reset estados cursor: arrastrando=False, sobre_nodo=False")
+            self._actualizar_cursor()
+            
             return
 
         # Desactivar los otros botones
         for b in (self.view.mover_button, self.view.colocar_vertice_button, 
-                  self.view.crear_ruta_button):
+                self.view.crear_ruta_button):
             if b is not boton:
                 b.setChecked(False)
 
         if boton == self.view.mover_button:
+            print("Activando modo MOVER...")
             # --- MODO MOVER ---
             self.modo_actual = "mover"
             self.mover_ctrl.activar()
@@ -263,8 +406,18 @@ class EditorController(QObject):
                         pass
 
             print("Modo Mover activado: nodos arrastrables, mapa fijo")
+            
+            # --- NUEVO: Actualizar descripción del modo ---
+            self.actualizar_descripcion_modo("mover")
+            
+            # --- NUEVO: Resetear estado de arrastre y actualizar cursor ---
+            self._arrastrando_nodo = False
+            self._cursor_sobre_nodo = False
+            print("Reset estados cursor: arrastrando=False, sobre_nodo=False")
+            self._actualizar_cursor()
 
         elif boton == self.view.colocar_vertice_button:
+            print("Activando modo COLOCAR...")
             # --- MODO COLOCAR ---
             self.modo_actual = "colocar"
             self.colocar_ctrl.activar()
@@ -279,8 +432,18 @@ class EditorController(QObject):
             self.view.marco_trabajo.setDragMode(self.view.marco_trabajo.NoDrag)
             
             print("Modo Colocar activado: añadir nuevos nodos")
+            
+            # --- NUEVO: Actualizar descripción del modo ---
+            self.actualizar_descripcion_modo("colocar")
+            
+            # --- NUEVO: Resetear estado de arrastre y actualizar cursor ---
+            self._arrastrando_nodo = False
+            self._cursor_sobre_nodo = False
+            print("Reset estados cursor: arrastrando=False, sobre_nodo=False")
+            self._actualizar_cursor()
 
         elif boton == self.view.crear_ruta_button:
+            print("Activando modo RUTA...")
             # --- MODO RUTA ---
             self.modo_actual = "ruta"
             
@@ -289,11 +452,9 @@ class EditorController(QObject):
                 print("✗ ERROR: No hay proyecto cargado. Crea o abre un proyecto primero.")
                 boton.setChecked(False)
                 QMessageBox.warning(self.view, "Error", 
-                                   "No hay proyecto cargado. Crea o abre un proyecto primero.")
+                                "No hay proyecto cargado. Crea o abre un proyecto primero.")
                 return
-                
-            # CORRECCIÓN CRÍTICA: NO verificar que haya nodos, porque el usuario puede crear el primer nodo
-            # al hacer clic en el mapa. Esta verificación estaba mal.
+                    
             print("Activando modo ruta - El usuario puede crear nodos haciendo clic en el mapa")
             
             # Activar modo ruta
@@ -303,15 +464,38 @@ class EditorController(QObject):
             self.view.marco_trabajo.setDragMode(self.view.marco_trabajo.NoDrag)
             
             print("Modo Ruta activado: crear rutas entre nodos")
-            print("Instrucciones:")
-            print("- Haz clic en nodos existentes o en el mapa para crear nuevos")
-            print("- Los nodos se conectarán con líneas verdes")
-            print("- Presiona ENTER para finalizar la ruta")
-            print("- Presiona ESC para cancelar")
-            print("- Haz clic en el botón de ruta nuevamente para terminar")
+            
+            # --- NUEVO: Actualizar descripción del modo ---
+            self.actualizar_descripcion_modo("ruta")
+            
+            # --- NUEVO: Resetear estado de arrastre y actualizar cursor ---
+            self._arrastrando_nodo = False
+            self._cursor_sobre_nodo = False
+            print("Reset estados cursor: arrastrando=False, sobre_nodo=False")
+            self._actualizar_cursor()
 
         # Actualizar líneas después de cambiar modo
         self.actualizar_lineas_rutas()
+    
+    # --- NUEVO MÉTODO: Actualizar descripción del modo ---
+    def actualizar_descripcion_modo(self, modo=None):
+        """
+        Actualiza la descripción del modo actual en la barra inferior.
+        Si no se especifica modo, usa self.modo_actual.
+        """
+        if modo is None:
+            modo = self.modo_actual
+        
+        # Si no hay modo activo, usar navegación por defecto
+        if modo is None:
+            modo = "navegacion"
+        
+        # Llamar al método de la vista para actualizar
+        if hasattr(self.view, 'actualizar_descripcion_modo'):
+            try:
+                self.view.actualizar_descripcion_modo(modo)
+            except Exception as e:
+                print(f"Error al actualizar descripción del modo: {e}")
 
     # --- MÉTODOS PARA MANEJO DE EVENTOS DE TECLADO ---
     
@@ -327,6 +511,9 @@ class EditorController(QObject):
                 self.view.crear_ruta_button.setChecked(False)
                 # Y llamar a cambiar_modo para limpiar todo
                 self.cambiar_modo(self.view.crear_ruta_button)
+                
+                # --- NUEVO: Actualizar descripción al volver a modo navegación ---
+                self.actualizar_descripcion_modo("navegacion")
                 
             except Exception as e:
                 print(f"Error al finalizar ruta con Enter: {e}")
@@ -345,6 +532,9 @@ class EditorController(QObject):
                 self.view.crear_ruta_button.setChecked(False)
                 # Y llamar a cambiar_modo para limpiar todo
                 self.cambiar_modo(self.view.crear_ruta_button)
+                
+                # --- NUEVO: Actualizar descripción al volver a modo navegación ---
+                self.actualizar_descripcion_modo("navegacion")
                 
             except Exception as e:
                 print(f"Error al cancelar ruta: {e}")
@@ -463,6 +653,9 @@ class EditorController(QObject):
                 'x_inicial': x_inicial,
                 'y_inicial': y_inicial
             }
+            
+            # NUEVO: Iniciar arrastre para cambiar cursor
+            self.nodo_arrastre_iniciado()
         except Exception as e:
             print(f"Error registrando movimiento iniciado: {e}")
     
@@ -521,6 +714,8 @@ class EditorController(QObject):
             print(f"Error registrando movimiento finalizado: {e}")
         finally:
             self.movimiento_actual = None
+            # NUEVO: Terminar arrastre para cambiar cursor
+            self.nodo_arrastre_terminado()
     
     def deshacer_movimiento(self):
         """Deshace el último movimiento (Ctrl+Z)"""
@@ -782,6 +977,13 @@ class EditorController(QObject):
 
         # Crear nuevo NodoItem
         nodo_item = NodoItem(nodo, size=size, editor=self)
+
+        # CONEXIÓN DE SEÑALES HOVER - NUEVO
+        try:
+            nodo_item.hover_entered.connect(self.nodo_hover_entered)
+            nodo_item.hover_leaved.connect(self.nodo_hover_leaved)
+        except Exception as e:
+            print(f"Error conectando señales hover: {e}")
 
         # Flags básicos: seleccionable y focusable siempre; movible según modo actual
         try:
@@ -1329,6 +1531,8 @@ class EditorController(QObject):
             for item in self.scene.items():
                 if isinstance(item, NodoItem):
                     item.set_normal_color()
+                    # Restaurar z-values normales
+                    item.setZValue(1)
             return
 
         # Guardar el índice de la ruta seleccionada
@@ -1344,10 +1548,11 @@ class EditorController(QObject):
         if self.ruta_actual_idx is None:
             return
 
-        # IMPORTANTE: Restaurar todos los nodos a color normal primero
+        # IMPORTANTE: Restaurar todos los nodos a color normal y z-value normal primero
         for item in self.scene.items():
             if isinstance(item, NodoItem):
                 item.set_normal_color()
+                item.setZValue(1)
 
         # Deseleccionar todos los nodos primero
         self._changing_selection = True
@@ -1462,7 +1667,7 @@ class EditorController(QObject):
         return f"[{', '.join(str(id) for id in ids)}]"
 
     def _actualizar_propiedad_ruta(self, item):
-        """Actualiza la ruta cuando el usuario edita propertiesTable"""
+        """Actualiza la ruta a través del proyecto para notificar cambios"""
         if item.column() != 1:
             return
             
@@ -1551,20 +1756,10 @@ class EditorController(QObject):
                 except Exception as e:
                     print(f"Error procesando lista de visita: {e}")
 
-            # Normalizar y actualizar referencia en proyecto.rutas
+            # Normalizar y actualizar referencia en proyecto.rutas usando el método del proyecto
             self._normalize_route_nodes(ruta_dict)
+            self.proyecto.actualizar_ruta(self.ruta_actual_idx, ruta_dict)
             
-            # Actualizar la ruta en el proyecto
-            self.proyecto.rutas[self.ruta_actual_idx] = ruta_dict
-
-            # Actualizar UI
-            self._dibujar_rutas()
-            self._mostrar_rutas_lateral()
-            
-            # Reseleccionar la ruta para actualizar la vista
-            if hasattr(self.view, "rutasList"):
-                self.view.rutasList.setCurrentRow(self.ruta_actual_idx)
-
             print(f"Ruta actualizada exitosamente")
             
         except Exception as err:
@@ -1729,12 +1924,7 @@ class EditorController(QObject):
             print("Error en actualizar_propiedades_valores:", err)
 
     def _actualizar_propiedad_nodo(self, item):
-        """
-        Maneja cambios en propertiesTable para un nodo.
-        - Evita reentradas con self._updating_ui.
-        - Parsea el valor (ast.literal_eval cuando sea posible).
-        - Actualiza el modelo (nodo.update) y la UI.
-        """
+        """Actualiza la propiedad de un nodo a través del proyecto para notificar cambios"""
         if self._updating_ui or item.column() != 1:
             return
 
@@ -1752,7 +1942,6 @@ class EditorController(QObject):
         try:
             # Si la clave es X o Y, convertir de metros a píxeles
             if clave in ["X", "Y"]:
-                # Asumimos que el usuario introduce metros
                 try:
                     valor_metros = float(valor)
                     valor = self.metros_a_pixeles(valor_metros)
@@ -1760,101 +1949,13 @@ class EditorController(QObject):
                     print(f"Error: Valor de {clave} debe ser un número")
                     return
 
-            # Actualizar el modelo
-            if hasattr(nodo, "update"):
-                nodo.update({clave: valor})
-            else:
-                try:
-                    setattr(nodo, clave, valor)
-                except Exception:
-                    pass
-            print(f"Nodo actualizado: {clave} = {valor}")
+            # Usar el método del proyecto para actualizar (esto emitirá la señal)
+            self.proyecto.actualizar_nodo({clave: valor, "id": nodo.get('id')})
+            
         except Exception as err:
             print("Error actualizando nodo en el modelo:", err)
             return
-
-        # Si cambió el objetivo, actualizar el nodo visual
-        if clave == "objetivo":
-            try:
-                for scene_item in self.scene.items():
-                    if isinstance(scene_item, NodoItem) and getattr(scene_item, "nodo", None) == nodo:
-                        scene_item.actualizar_objetivo()
-                        break
-            except Exception as e:
-                print(f"Error actualizando objetivo: {e}")
-
-        # Si cambiaron coordenadas, actualizar la posición visual del NodoItem
-        if clave in ("X", "Y"):
-            try:
-                for scene_item in self.scene.items():
-                    if isinstance(scene_item, NodoItem) and getattr(scene_item, "nodo", None) == nodo:
-                        try:
-                            scene_item.actualizar_posicion()
-                        except Exception:
-                            try:
-                                x = int(nodo.get("X", 0)) if hasattr(nodo, "get") else int(getattr(nodo, "X", 0))
-                                y = int(nodo.get("Y", 0)) if hasattr(nodo, "get") else int(getattr(nodo, "Y", 0))
-                                scene_item.setPos(x - scene_item.size / 2, y - scene_item.size / 2)
-                            except Exception:
-                                pass
-                        break
-            except Exception:
-                pass
-
-            # Forzar actualización de líneas de rutas asociadas
-            try:
-                # Buscar el NodoItem correspondiente
-                for scene_item in self.scene.items():
-                    if isinstance(scene_item, NodoItem) and getattr(scene_item, "nodo", None) == nodo:
-                        self.on_nodo_moved(scene_item)
-                        break
-            except Exception:
-                try:
-                    self._dibujar_rutas()
-                except Exception:
-                    pass
-
-        # Actualizar texto en la lista lateral (si existe)
-        try:
-            for i in range(self.view.nodosList.count()):
-                li = self.view.nodosList.item(i)
-                widget = self.view.nodosList.itemWidget(li)
-                if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo.get('id'):
-                    x_px = nodo.get('X', 0)
-                    y_px = nodo.get('Y', 0)
-                    # Convertir a metros para mostrar
-                    x_m = self.pixeles_a_metros(x_px)
-                    y_m = self.pixeles_a_metros(y_px)
-                    objetivo = nodo.get('objetivo', 0)
-                    
-                    # Determinar texto según objetivo
-                    if objetivo == 1:
-                        texto_objetivo = "IN"
-                    elif objetivo == 2:
-                        texto_objetivo = "OUT"
-                    elif objetivo == 3:
-                        texto_objetivo = "I/O"
-                    else:
-                        texto_objetivo = "Sin objetivo"
-                    
-                    widget.lbl_texto.setText(f"ID {nodo.get('id')} - {texto_objetivo} ({x_m:.2f}, {y_m:.2f})")
-                    break
-        except Exception:
-            pass
-
-        # Si la tabla de propiedades está mostrando este nodo, mantenerla sincronizada
-        try:
-            seleccionados = self.view.nodosList.selectedItems()
-            if seleccionados:
-                for i in range(self.view.nodosList.count()):
-                    item = self.view.nodosList.item(i)
-                    if item.isSelected():
-                        widget = self.view.nodosList.itemWidget(item)
-                        if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo.get('id'):
-                            self.actualizar_propiedades_valores(nodo, claves=("X", "Y"))
-                            break
-        except Exception:
-            pass
+        
 
     # --- Eliminar nodo con reconfiguración de rutas ---
     def eliminar_nodo(self, nodo, nodo_item):
@@ -2318,48 +2419,437 @@ class EditorController(QObject):
 
     # --- Actualizar líneas cuando un nodo se mueve ---
     def on_nodo_moved(self, nodo_item):
-        """VERSIÓN MEJORADA con reparación de referencias"""
+        """Versión CORREGIDA para actualización en tiempo real durante arrastre"""
         try:
+            # Verificar que estamos en modo mover
+            if self.modo_actual != "mover":
+                return
+                
+            print(f"DEBUG on_nodo_moved: Llamado para nodo_item tipo {type(nodo_item)}")
+            
             nodo = getattr(nodo_item, "nodo", None)
             if not nodo:
+                print("ERROR: nodo_item no tiene atributo 'nodo'")
                 return
 
-            # 1. Obtener posición ACTUAL del nodo
+            # Obtener posición ACTUAL del nodo DURANTE el arrastre
             scene_pos = nodo_item.scenePos()
             x = int(scene_pos.x() + nodo_item.size / 2)
             y = int(scene_pos.y() + nodo_item.size / 2)
 
-            # 2. Obtener ID del nodo movido
-            nodo_id = nodo.get("id") if isinstance(nodo, dict) else getattr(nodo, "id", None)
-
-            # 3. Actualizar modelo
+            # Obtener ID del nodo movido - FORMA MEJORADA
+            nodo_id = None
+            
+            # Método 1: Intentar obtener directamente del nodo
             if isinstance(nodo, dict):
-                nodo["X"] = x
-                nodo["Y"] = y
-            else:
-                setattr(nodo, "X", x)
-                setattr(nodo, "Y", y)
+                nodo_id = nodo.get("id")
+                print(f"DEBUG on_nodo_moved: nodo es dict, id={nodo_id}")
+            elif hasattr(nodo, "get"):
+                nodo_id = nodo.get("id")
+                print(f"DEBUG on_nodo_moved: nodo tiene get(), id={nodo_id}")
+            elif hasattr(nodo, "id"):
+                nodo_id = getattr(nodo, "id")
+                print(f"DEBUG on_nodo_moved: nodo tiene atributo id, id={nodo_id}")
+            
+            # Método 2: Si aún no tenemos ID, intentar del nodo_item
+            if nodo_id is None and hasattr(nodo_item, "nodo_id"):
+                nodo_id = getattr(nodo_item, "nodo_id", None)
+                print(f"DEBUG on_nodo_moved: Obteniendo de nodo_item.nodo_id={nodo_id}")
+            
+            # Método 3: Último recurso - buscar en el proyecto
+            if nodo_id is None and self.proyecto:
+                for n in self.proyecto.nodos:
+                    # Comparar por referencia o por posición
+                    if n is nodo or (isinstance(n, dict) and n.get('X') == x and n.get('Y') == y):
+                        nodo_id = n.get('id') if isinstance(n, dict) else getattr(n, 'id', None)
+                        print(f"DEBUG on_nodo_moved: Encontrado por referencia, id={nodo_id}")
+                        break
 
-            # 4. REPARAR REFERENCIAS ANTES DE ACTUALIZAR RUTAS
-            self._reparar_referencias_rutas()
+            if nodo_id is None:
+                print(f"ERROR: No se pudo obtener ID del nodo. Tipo nodo: {type(nodo)}")
+                # Intentar una última opción: si el nodo tiene __dict__
+                if hasattr(nodo, "__dict__"):
+                    print(f"DEBUG: __dict__ del nodo: {nodo.__dict__}")
+                    if 'id' in nodo.__dict__:
+                        nodo_id = nodo.__dict__['id']
+                        print(f"DEBUG: Encontrado id en __dict__: {nodo_id}")
+                
+                if nodo_id is None:
+                    return
 
-            # 5. ACTUALIZAR UI
-            self.actualizar_lista_nodo(nodo)
-            self.actualizar_propiedades_valores(nodo, claves=("X", "Y"))
-
-            # 6. ACTUALIZAR RUTAS
-            self._dibujar_rutas()
-
-            # 7. ACTUALIZAR HIGHLIGHTS
-            if hasattr(self.view, "rutasList") and self.view.rutasList.selectedItems():
-                self.seleccionar_ruta_desde_lista()
-
-            # 8. FORZAR ACTUALIZACIÓN VISUAL
-            self.scene.update()
-            self.view.marco_trabajo.viewport().update()
-
+            print(f"DEBUG: Nodo {nodo_id} moviéndose a ({x}, {y})")
+            
+            # ACTUALIZACIÓN EN TIEMPO REAL de todas las rutas que contienen este nodo
+            self._actualizar_rutas_con_nodo_en_tiempo_real(nodo_id, x, y)
+            
         except Exception as err:
-            print(f"ERROR CRÍTICO en on_nodo_moved: {err}")
+            print(f"ERROR en on_nodo_moved: {err}")
+            import traceback
+            traceback.print_exc()
+
+    def _actualizar_rutas_con_nodo_en_tiempo_real(self, nodo_id, x, y):
+        """Actualiza TODAS las rutas que contienen el nodo movido, usando las coordenadas en tiempo real"""
+        if not getattr(self, "proyecto", None) or not hasattr(self.proyecto, "rutas"):
+            print("DEBUG: No hay proyecto o rutas")
+            return
+        
+        print(f"DEBUG: Actualizando rutas para nodo {nodo_id} en ({x}, {y})")
+        
+        # Buscar todas las rutas que contienen este nodo
+        rutas_a_actualizar = []
+        for idx, ruta in enumerate(self.proyecto.rutas):
+            try:
+                ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+                
+                # Verificar si la ruta contiene el nodo movido
+                contiene_nodo = False
+                
+                # Función auxiliar para comparar IDs
+                def comparar_ids(nodo_ruta, target_id):
+                    if nodo_ruta is None:
+                        return False
+                    if isinstance(nodo_ruta, dict):
+                        return nodo_ruta.get("id") == target_id
+                    elif hasattr(nodo_ruta, "get"):
+                        return nodo_ruta.get("id") == target_id
+                    elif hasattr(nodo_ruta, "id"):
+                        return getattr(nodo_ruta, "id") == target_id
+                    return False
+                
+                # Verificar origen
+                if ruta_dict.get("origen") and comparar_ids(ruta_dict["origen"], nodo_id):
+                    contiene_nodo = True
+                    print(f"DEBUG: Ruta {idx} contiene nodo {nodo_id} como ORIGEN")
+                
+                # Verificar destino
+                if not contiene_nodo and ruta_dict.get("destino") and comparar_ids(ruta_dict["destino"], nodo_id):
+                    contiene_nodo = True
+                    print(f"DEBUG: Ruta {idx} contiene nodo {nodo_id} como DESTINO")
+                
+                # Verificar visita
+                if not contiene_nodo:
+                    for nodo_visita in ruta_dict.get("visita", []):
+                        if comparar_ids(nodo_visita, nodo_id):
+                            contiene_nodo = True
+                            print(f"DEBUG: Ruta {idx} contiene nodo {nodo_id} en VISITA")
+                            break
+                
+                if contiene_nodo:
+                    rutas_a_actualizar.append((idx, ruta_dict))
+            except Exception as e:
+                print(f"Error verificando ruta {idx}: {e}")
+                continue
+        
+        # Si no hay rutas que actualizar, salir
+        if not rutas_a_actualizar:
+            print(f"DEBUG: No se encontraron rutas que contengan el nodo {nodo_id}")
+            # Mostrar todas las rutas para debug
+            print("DEBUG: Rutas disponibles:")
+            for idx, ruta in enumerate(self.proyecto.rutas):
+                try:
+                    ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+                    print(f"  Ruta {idx}: {ruta_dict}")
+                except:
+                    print(f"  Ruta {idx}: ERROR al convertir")
+            return
+        
+        print(f"DEBUG: Encontradas {len(rutas_a_actualizar)} rutas para actualizar")
+        
+        # Actualizar las líneas de TODAS las rutas afectadas
+        self._actualizar_lineas_rutas_en_tiempo_real(rutas_a_actualizar, nodo_id, x, y)
+
+
+    def _obtener_id_de_nodo(self, nodo):
+        """Obtiene el ID de un nodo de manera segura"""
+        if not nodo:
+            return None
+        if isinstance(nodo, dict):
+            return nodo.get("id")
+        elif hasattr(nodo, "get"):
+            return nodo.get("id")
+        elif hasattr(nodo, "id"):
+            return getattr(nodo, "id")
+        return None
+
+    def _actualizar_lineas_rutas_en_tiempo_real(self, rutas_info, nodo_id, x, y):
+        """Actualiza las líneas de las rutas en tiempo real durante el arrastre"""
+        # IMPORTANTE: No limpiamos todas las líneas, solo las de las rutas afectadas
+        
+        pen = QPen(Qt.red, 2)
+        pen.setCosmetic(True)
+        
+        # Primero, eliminar las líneas de las rutas que vamos a actualizar
+        for idx, ruta_dict in rutas_info:
+            if idx < len(self._route_lines):
+                for line_item in self._route_lines[idx]:
+                    try:
+                        if line_item and line_item.scene() is not None:
+                            self.scene.removeItem(line_item)
+                    except Exception:
+                        pass
+                self._route_lines[idx] = []
+        
+        # Ahora, volver a dibujar CADA ruta con las coordenadas actualizadas
+        for idx, ruta_dict in rutas_info:
+            # Crear una copia del diccionario de la ruta para modificarla
+            ruta_actualizada = dict(ruta_dict)
+            
+            # Actualizar las coordenadas del nodo movido en la ruta
+            self._actualizar_coordenadas_en_ruta(ruta_actualizada, nodo_id, x, y)
+            
+            # Obtener todos los puntos de la ruta
+            puntos = self._obtener_puntos_de_ruta(ruta_actualizada)
+            
+            if len(puntos) < 2:
+                continue
+            
+            # Verificar visibilidad
+            if not self._ruta_es_visible(ruta_actualizada):
+                continue
+            
+            # Dibujar los segmentos de la ruta
+            route_line_items = []
+            for i in range(len(puntos) - 1):
+                n1, n2 = puntos[i], puntos[i + 1]
+                
+                try:
+                    x1 = self._obtener_coordenada_x(n1)
+                    y1 = self._obtener_coordenada_y(n1)
+                    x2 = self._obtener_coordenada_x(n2)
+                    y2 = self._obtener_coordenada_y(n2)
+                    
+                    # Solo dibujar si las coordenadas son válidas
+                    if x1 is not None and y1 is not None and x2 is not None and y2 is not None:
+                        line_item = self.scene.addLine(x1, y1, x2, y2, pen)
+                        line_item.setZValue(0.5)
+                        line_item.setData(0, ("route_line", idx, i))
+                        line_item.setVisible(True)
+                        
+                        route_line_items.append(line_item)
+                        
+                except Exception as e:
+                    print(f"Error dibujando segmento {i}: {e}")
+                    continue
+            
+            # Asegurarse de que tenemos espacio en el array
+            while len(self._route_lines) <= idx:
+                self._route_lines.append([])
+            
+            self._route_lines[idx] = route_line_items
+        
+        # Forzar actualización de la vista INMEDIATAMENTE
+        self.view.marco_trabajo.viewport().update()
+        print(f"DEBUG: {len(rutas_info)} rutas actualizadas en tiempo real")
+
+    def _actualizar_coordenadas_en_ruta(self, ruta_dict, nodo_id, x, y):
+        """Actualiza las coordenadas de un nodo específico en una ruta"""
+        # Actualizar origen
+        if ruta_dict.get("origen") and self._obtener_id_de_nodo(ruta_dict["origen"]) == nodo_id:
+            if isinstance(ruta_dict["origen"], dict):
+                ruta_dict["origen"]["X"] = x
+                ruta_dict["origen"]["Y"] = y
+            elif hasattr(ruta_dict["origen"], "update"):
+                ruta_dict["origen"].update({"X": x, "Y": y})
+        
+        # Actualizar destino
+        elif ruta_dict.get("destino") and self._obtener_id_de_nodo(ruta_dict["destino"]) == nodo_id:
+            if isinstance(ruta_dict["destino"], dict):
+                ruta_dict["destino"]["X"] = x
+                ruta_dict["destino"]["Y"] = y
+            elif hasattr(ruta_dict["destino"], "update"):
+                ruta_dict["destino"].update({"X": x, "Y": y})
+        
+        # Actualizar visita
+        else:
+            for nodo_visita in ruta_dict.get("visita", []):
+                if self._obtener_id_de_nodo(nodo_visita) == nodo_id:
+                    if isinstance(nodo_visita, dict):
+                        nodo_visita["X"] = x
+                        nodo_visita["Y"] = y
+                    elif hasattr(nodo_visita, "update"):
+                        nodo_visita.update({"X": x, "Y": y})
+                    break
+
+    def _obtener_puntos_de_ruta(self, ruta_dict):
+        """Obtiene todos los puntos de una ruta en orden"""
+        puntos = []
+        
+        if ruta_dict.get("origen"):
+            puntos.append(ruta_dict["origen"])
+        
+        if ruta_dict.get("visita"):
+            puntos.extend(ruta_dict["visita"])
+        
+        if ruta_dict.get("destino"):
+            puntos.append(ruta_dict["destino"])
+        
+        return puntos
+
+    def _ruta_es_visible(self, ruta_dict):
+        """Verifica si todos los nodos de una ruta están visibles"""
+        puntos = self._obtener_puntos_de_ruta(ruta_dict)
+        
+        for punto in puntos:
+            nodo_id = self._obtener_id_de_nodo(punto)
+            if nodo_id is not None and not self.visibilidad_nodos.get(nodo_id, True):
+                return False
+        
+        return True
+
+    def _obtener_coordenada_x(self, nodo):
+        """Obtiene la coordenada X de un nodo de manera segura"""
+        if isinstance(nodo, dict):
+            return nodo.get("X", 0)
+        elif hasattr(nodo, "get"):
+            return nodo.get("X", 0)
+        elif hasattr(nodo, "X"):
+            return getattr(nodo, "X", 0)
+        return 0
+
+    def _obtener_coordenada_y(self, nodo):
+        """Obtiene la coordenada Y de un nodo de manera segura"""
+        if isinstance(nodo, dict):
+            return nodo.get("Y", 0)
+        elif hasattr(nodo, "get"):
+            return nodo.get("Y", 0)
+        elif hasattr(nodo, "Y"):
+            return getattr(nodo, "Y", 0)
+        return 0
+
+    def _actualizar_rutas_con_nodo(self, nodo_id, nueva_x, nueva_y):
+        """Actualiza solo las rutas que contienen el nodo movido (más eficiente)"""
+        if not getattr(self, "proyecto", None) or not hasattr(self.proyecto, "rutas"):
+            return
+        
+        # Buscar rutas que contienen este nodo
+        rutas_a_actualizar = []
+        for idx, ruta in enumerate(self.proyecto.rutas):
+            try:
+                ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+                self._normalize_route_nodes(ruta_dict)
+                
+                # Verificar si la ruta contiene el nodo movido
+                contiene_nodo = False
+                if ruta_dict.get("origen") and ruta_dict["origen"].get("id") == nodo_id:
+                    contiene_nodo = True
+                elif ruta_dict.get("destino") and ruta_dict["destino"].get("id") == nodo_id:
+                    contiene_nodo = True
+                else:
+                    for nodo_visita in ruta_dict.get("visita", []):
+                        if nodo_visita.get("id") == nodo_id:
+                            contiene_nodo = True
+                            break
+                
+                if contiene_nodo:
+                    rutas_a_actualizar.append(idx)
+            except Exception:
+                continue
+        
+        # Actualizar solo las líneas de las rutas afectadas
+        self._actualizar_lineas_rutas_especificas(rutas_a_actualizar, nodo_id, nueva_x, nueva_y)
+
+    def _actualizar_lineas_rutas_especificas(self, indices_rutas, nodo_id=None, nueva_x=None, nueva_y=None):
+        """Actualiza solo las líneas de las rutas especificadas por sus índices"""
+        if not indices_rutas:
+            return
+        
+        # Eliminar líneas de estas rutas específicas
+        for idx in indices_rutas:
+            if idx < len(self._route_lines):
+                for line_item in self._route_lines[idx]:
+                    try:
+                        if line_item and line_item.scene() is not None:
+                            self.scene.removeItem(line_item)
+                    except Exception:
+                        pass
+                self._route_lines[idx] = []
+        
+        # Volver a dibujar estas rutas
+        pen = QPen(Qt.red, 2)
+        pen.setCosmetic(True)
+        
+        for idx in indices_rutas:
+            if idx >= len(self.proyecto.rutas):
+                continue
+                
+            ruta = self.proyecto.rutas[idx]
+            
+            # Verificar si la ruta está visible
+            if not self.visibilidad_rutas.get(idx, True):
+                continue
+                
+            try:
+                ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+            except Exception:
+                ruta_dict = ruta
+
+            self._normalize_route_nodes(ruta_dict)
+            
+            # Si estamos actualizando un nodo específico, actualizar sus coordenadas en la ruta
+            if nodo_id and nueva_x is not None and nueva_y is not None:
+                if ruta_dict.get("origen") and ruta_dict["origen"].get("id") == nodo_id:
+                    ruta_dict["origen"]["X"] = nueva_x
+                    ruta_dict["origen"]["Y"] = nueva_y
+                elif ruta_dict.get("destino") and ruta_dict["destino"].get("id") == nodo_id:
+                    ruta_dict["destino"]["X"] = nueva_x
+                    ruta_dict["destino"]["Y"] = nueva_y
+                else:
+                    for nodo_visita in ruta_dict.get("visita", []):
+                        if nodo_visita.get("id") == nodo_id:
+                            nodo_visita["X"] = nueva_x
+                            nodo_visita["Y"] = nueva_y
+                            break
+            
+            # Obtener puntos
+            puntos = []
+            if ruta_dict.get("origen"):
+                puntos.append(ruta_dict["origen"])
+            puntos.extend(ruta_dict.get("visita", []) or [])
+            if ruta_dict.get("destino"):
+                puntos.append(ruta_dict["destino"])
+
+            if len(puntos) < 2:
+                continue
+
+            # Verificar que todos los nodos de la ruta estén visibles
+            todos_visibles = True
+            for punto in puntos:
+                if isinstance(punto, dict):
+                    nodo_id_punto = punto.get('id')
+                    if nodo_id_punto is not None and not self.visibilidad_nodos.get(nodo_id_punto, True):
+                        todos_visibles = False
+                        break
+            
+            if not todos_visibles:
+                continue
+
+            route_line_items = []
+            for i in range(len(puntos) - 1):
+                n1, n2 = puntos[i], puntos[i + 1]
+                
+                try:
+                    x1 = n1.get("X", 0) if isinstance(n1, dict) else getattr(n1, "X", 0)
+                    y1 = n1.get("Y", 0) if isinstance(n1, dict) else getattr(n1, "Y", 0)
+                    x2 = n2.get("X", 0) if isinstance(n2, dict) else getattr(n2, "X", 0)
+                    y2 = n2.get("Y", 0) if isinstance(n2, dict) else getattr(n2, "Y", 0)
+                    
+                    line_item = self.scene.addLine(x1, y1, x2, y2, pen)
+                    line_item.setZValue(0.5)
+                    line_item.setData(0, ("route_line", idx, i))
+                    line_item.setVisible(True)
+                    
+                    route_line_items.append(line_item)
+                    
+                except Exception:
+                    continue
+            
+            if idx >= len(self._route_lines):
+                self._route_lines.extend([[]] * (idx - len(self._route_lines) + 1))
+            
+            self._route_lines[idx] = route_line_items
+
+        # Forzar actualización de la vista
+        self.view.marco_trabajo.viewport().update()
 
     # --- Utilidades para líneas y rutas ---
     def _clear_route_lines(self):
@@ -2408,54 +2898,85 @@ class EditorController(QObject):
             self.keyPressEvent(event)
             return True
         
+        # Detectar movimiento del ratón para actualizar cursor dinámicamente
+        if event.type() == QEvent.MouseMove:
+            # Solo actualizar si estamos en modo por defecto
+            if self.modo_actual is None:
+                # Verificar si hay nodos en la posición actual
+                pos = self.view.marco_trabajo.mapToScene(event.pos())
+                items = self.scene.items(pos)
+                hay_nodo = any(isinstance(it, NodoItem) for it in items)
+                
+                # Si el estado de hover cambia, actualizar
+                if hay_nodo and not self._cursor_sobre_nodo:
+                    # El ratón acaba de entrar en un nodo
+                    self._cursor_sobre_nodo = True
+                    self._actualizar_cursor()
+                elif not hay_nodo and self._cursor_sobre_nodo:
+                    # El ratón acaba de salir de un nodo
+                    self._cursor_sobre_nodo = False
+                    self._actualizar_cursor()
+        
         # Detectar click izquierdo en el viewport
         if event.type() == QEvent.MouseButtonPress:
             # Mapear a escena
             pos = self.view.marco_trabajo.mapToScene(event.pos())
             
             # PRIMERO: Si estamos en modo ruta o modo colocar, NO manejar el clic aquí
-            # Los controladores respectivos manejarán los clics a través de su eventFilter
             if self.modo_actual in ["ruta", "colocar"]:
-                return False  # Dejar que el controlador respectivo maneje el clic
+                return False
             
-            # SEGUNDO: Comportamiento normal (solo si NO estamos en modo ruta o colocar)
+            # SEGUNDO: Comportamiento normal
             items = self.scene.items(pos)
             if not any(isinstance(it, NodoItem) for it in items):
-                # deseleccionar items de la escena
+                # Click fuera de nodo
+                print("CLICK FUERA DE NODO")
+                
+                # Resetear estado de hover
+                if self._cursor_sobre_nodo:
+                    self._cursor_sobre_nodo = False
+                    self._actualizar_cursor()
+                
+                # Si estábamos arrastrando, terminar el arrastre
+                if self._arrastrando_nodo:
+                    self.nodo_arrastre_terminado()
+                
+                # Resto del código existente...
                 try:
                     for it in self.scene.selectedItems():
                         it.setSelected(False)
                 except Exception:
-                        pass
-                    
-                    # deseleccionar lista de nodos
-                try:
-                        self.view.nodosList.clearSelection()
-                except Exception:
-                        pass
-                    
-                    # deseleccionar lista de rutas y limpiar highlights
-                try:
-                        if hasattr(self.view, "rutasList"):
-                            self.view.rutasList.clearSelection()
-                except Exception:
-                        pass
-                    
-                self._clear_highlight_lines()
-                    
-                    # limpiar propertiesTable
-                try:
-                        self.view.propertiesTable.clear()
-                        self.view.propertiesTable.setRowCount(0)
-                        self.view.propertiesTable.setColumnCount(2)
-                        self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
-                except Exception:
-                        pass
-                    
-                    # Restaurar colores de nodos
+                    pass
+                
                 for item in self.scene.items():
-                        if isinstance(item, NodoItem):
-                            item.set_normal_color()
+                    if isinstance(item, NodoItem):
+                        item.setZValue(1)
+                    
+                try:
+                    self.view.nodosList.clearSelection()
+                except Exception:
+                    pass
+                
+                try:
+                    if hasattr(self.view, "rutasList"):
+                        self.view.rutasList.clearSelection()
+                except Exception:
+                    pass
+                
+                self._clear_highlight_lines()
+                
+                try:
+                    self.view.propertiesTable.clear()
+                    self.view.propertiesTable.setRowCount(0)
+                    self.view.propertiesTable.setColumnCount(2)
+                    self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
+                except Exception:
+                    pass
+                
+                for item in self.scene.items():
+                    if isinstance(item, NodoItem):
+                        item.set_normal_color()
+        
         return False
 
     def diagnosticar_estado_proyecto(self):
@@ -2899,3 +3420,393 @@ class EditorController(QObject):
         if confirmacion == QMessageBox.Yes:
             # Llamar al exportador pasando la escala
             ExportadorDB.exportar(self.proyecto, self.view, self.ESCALA)
+
+    def manejar_seleccion_nodo(self):
+        """Maneja la selección de nodos, ajustando z-values para nodos solapados"""
+        seleccionados = self.scene.selectedItems()
+        
+        # Primero, restaurar todos los nodos a su z-value normal
+        for item in self.scene.items():
+            if isinstance(item, NodoItem):
+                if not item.isSelected():
+                    item.setZValue(1)  # Valor z normal para nodos no seleccionados
+        
+        # Si hay nodos seleccionados, asegurarse de que estén encima
+        for item in seleccionados:
+            if isinstance(item, NodoItem):
+                # Establecer un valor z muy alto
+                item.setZValue(1000)
+                
+                # Verificar si hay nodos en la misma posición (solapados)
+                pos = item.scenePos()
+                rect = item.boundingRect().translated(pos)
+                
+                # Buscar nodos en la misma posición
+                nodos_solapados = []
+                for otro_item in self.scene.items():
+                    if isinstance(otro_item, NodoItem) and otro_item != item:
+                        otro_pos = otro_item.scenePos()
+                        # Verificar si están muy cerca (dentro de 5 píxeles)
+                        if (abs(otro_pos.x() - pos.x()) < 5 and 
+                            abs(otro_pos.y() - pos.y()) < 5):
+                            nodos_solapados.append(otro_item)
+                
+                # Si hay nodos solapados, asegurarse de que el seleccionado esté encima
+                if nodos_solapados:
+                    # El nodo seleccionado ya está en z=1000
+                    # Los otros nodos solapados los ponemos en z=999 para que queden justo debajo
+                    for nodo_solapado in nodos_solapados:
+                        nodo_solapado.setZValue(999)
+
+    def seleccionar_nodo_desde_mapa(self):
+        """Versión modificada para manejar nodos solapados"""
+        if self._changing_selection:
+            return
+            
+        seleccionados = self.scene.selectedItems()
+        if not seleccionados:
+            return
+            
+        nodo_item = seleccionados[0]
+        nodo = nodo_item.nodo
+
+        # --- DETECCIÓN DE NODOS SUPERPUESTOS ---
+        pos = nodo_item.scenePos()
+        # Usar un rectángulo pequeño alrededor del punto para detectar nodos cercanos
+        search_rect = nodo_item.boundingRect().translated(pos)
+        search_rect.adjust(-5, -5, 5, 5)  # Expandir un poco el área de búsqueda
+        
+        items_en_pos = self.scene.items(search_rect)
+        nodos_en_pos = []
+        
+        for item in items_en_pos:
+            if isinstance(item, NodoItem):
+                # Verificar si está realmente superpuesto (misma posición aproximada)
+                item_pos = item.scenePos()
+                if (abs(item_pos.x() - pos.x()) < 10 and 
+                    abs(item_pos.y() - pos.y()) < 10):
+                    nodos_en_pos.append(item)
+        
+        if len(nodos_en_pos) > 1:
+            # Hay nodos superpuestos, ajustar z-values primero
+            for nodo_en_pos in nodos_en_pos:
+                if nodo_en_pos == nodo_item:
+                    nodo_en_pos.setZValue(1000)  # El seleccionado encima
+                else:
+                    nodo_en_pos.setZValue(999)   # Los otros justo debajo
+            
+            # Mostrar menú
+            self.mostrar_menu_nodos_superpuestos(nodos_en_pos, pos)
+            return  # El menú manejará la selección
+
+        # --- CONTINUAR CON SELECCIÓN NORMAL ---
+        self._changing_selection = True
+        try:
+            # Deseleccionar rutas primero
+            if hasattr(self.view, "rutasList"):
+                self.view.rutasList.clearSelection()
+            
+            # Primero restaurar todos los nodos a color normal
+            self.restaurar_colores_nodos()
+            
+            # Asegurar que el nodo seleccionado esté encima
+            nodo_item.setZValue(1000)
+            
+            # Deseleccionar todos los nodos primero
+            for item in self.scene.selectedItems():
+                if item != nodo_item:
+                    item.setSelected(False)
+            
+            # Resaltar el nodo seleccionado
+            nodo_item.set_selected_color()
+            
+            # Sincronizar con la lista lateral
+            nodo_id = nodo.get('id')
+            for i in range(self.view.nodosList.count()):
+                item = self.view.nodosList.item(i)
+                widget = self.view.nodosList.itemWidget(item)
+                if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo_id:
+                    self.view.nodosList.setCurrentItem(item)
+                    self.mostrar_propiedades_nodo(nodo)
+                    break
+        finally:
+            self._changing_selection = False
+
+    def seleccionar_nodo_desde_lista(self):
+        """Versión modificada para manejar nodos solapados"""
+        if self._changing_selection:
+            return
+        items = self.view.nodosList.selectedItems()
+        if not items:
+            return
+        
+        # Obtener el nodo del widget
+        for i in range(self.view.nodosList.count()):
+            item = self.view.nodosList.item(i)
+            if item.isSelected():
+                widget = self.view.nodosList.itemWidget(item)
+                if widget and hasattr(widget, 'nodo_id'):
+                    nodo_id = widget.nodo_id
+                    nodo = self.obtener_nodo_por_id(nodo_id)
+                    if nodo:
+                        self._changing_selection = True
+                        try:
+                            # Deseleccionar rutas primero
+                            if hasattr(self.view, "rutasList"):
+                                self.view.rutasList.clearSelection()
+                            
+                            # Primero restaurar todos los nodos a color normal
+                            self.restaurar_colores_nodos()
+                            
+                            # Deseleccionar todo en la escena primero
+                            for scene_item in self.scene.selectedItems():
+                                scene_item.setSelected(False)
+                            
+                            # Buscar y seleccionar el nodo correspondiente
+                            for scene_item in self.scene.items():
+                                if isinstance(scene_item, NodoItem) and scene_item.nodo.get('id') == nodo_id:
+                                    scene_item.setSelected(True)
+                                    
+                                    # Asegurar que el nodo esté encima de todos
+                                    scene_item.setZValue(1000)
+                                    
+                                    # Verificar si hay nodos solapados
+                                    pos = scene_item.scenePos()
+                                    rect = scene_item.boundingRect().translated(pos)
+                                    
+                                    # Buscar nodos solapados
+                                    for otro_item in self.scene.items():
+                                        if isinstance(otro_item, NodoItem) and otro_item != scene_item:
+                                            otro_pos = otro_item.scenePos()
+                                            if (abs(otro_pos.x() - pos.x()) < 10 and 
+                                                abs(otro_pos.y() - pos.y()) < 10):
+                                                # Nodo solapado, ponerlo justo debajo
+                                                otro_item.setZValue(999)
+                                    
+                                    # Aplicar color de selección
+                                    scene_item.set_selected_color()
+                                    self.view.marco_trabajo.centerOn(scene_item)
+                                    self.mostrar_propiedades_nodo(nodo)
+                                    break
+                        finally:
+                            self._changing_selection = False
+                    break
+
+    def seleccionar_nodo_especifico(self, nodo):
+        """Selecciona un nodo específico desde el menú de superposición - Versión modificada"""
+        self._changing_selection = True
+        try:
+            # Limpiar selecciones previas
+            for item in self.scene.selectedItems():
+                item.setSelected(False)
+            
+            # Primero restaurar todos los nodos a color normal
+            self.restaurar_colores_nodos()
+            
+            # Buscar y seleccionar el nodo específico en la escena
+            for item in self.scene.items():
+                if isinstance(item, NodoItem) and item.nodo == nodo:
+                    item.setSelected(True)
+                    
+                    # Asegurar que el nodo seleccionado esté encima
+                    item.setZValue(1000)
+                    
+                    # Verificar si hay nodos solapados
+                    pos = item.scenePos()
+                    
+                    # Poner otros nodos solapados justo debajo
+                    for otro_item in self.scene.items():
+                        if isinstance(otro_item, NodoItem) and otro_item != item:
+                            otro_pos = otro_item.scenePos()
+                            if (abs(otro_pos.x() - pos.x()) < 10 and 
+                                abs(otro_pos.y() - pos.y()) < 10):
+                                otro_item.setZValue(999)
+                    
+                    item.set_selected_color()
+                    self.view.marco_trabajo.centerOn(item)
+                    break
+            
+            # Sincronizar con la lista lateral
+            nodo_id = nodo.get('id')
+            for i in range(self.view.nodosList.count()):
+                item = self.view.nodosList.item(i)
+                widget = self.view.nodosList.itemWidget(item)
+                if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo_id:
+                    self.view.nodosList.setCurrentItem(item)
+                    self.mostrar_propiedades_nodo(nodo)
+                    break
+        finally:
+            self._changing_selection = False
+
+    def eventFilter(self, obj, event):
+        # Detectar teclas presionadas
+        if event.type() == QEvent.KeyPress:
+            self.keyPressEvent(event)
+            return True
+        
+        # Detectar click izquierdo en el viewport
+        if event.type() == QEvent.MouseButtonPress:
+            # Mapear a escena
+            pos = self.view.marco_trabajo.mapToScene(event.pos())
+            
+            # PRIMERO: Si estamos en modo ruta o modo colocar, NO manejar el clic aquí
+            # Los controladores respectivos manejarán los clics a través de su eventFilter
+            if self.modo_actual in ["ruta", "colocar"]:
+                return False  # Dejar que el controlador respectivo maneje el clic
+            
+            # SEGUNDO: Comportamiento normal (solo si NO estamos en modo ruta o colocar)
+            items = self.scene.items(pos)
+            if not any(isinstance(it, NodoItem) for it in items):
+                # deseleccionar items de la escena
+                try:
+                    for it in self.scene.selectedItems():
+                        it.setSelected(False)
+                except Exception:
+                    pass
+                
+                # Restaurar z-values normales a todos los nodos
+                for item in self.scene.items():
+                    if isinstance(item, NodoItem):
+                        item.setZValue(1)
+                    
+                # deseleccionar lista de nodos
+                try:
+                    self.view.nodosList.clearSelection()
+                except Exception:
+                    pass
+                
+                # deseleccionar lista de rutas y limpiar highlights
+                try:
+                    if hasattr(self.view, "rutasList"):
+                        self.view.rutasList.clearSelection()
+                except Exception:
+                    pass
+                
+                self._clear_highlight_lines()
+                
+                # limpiar propertiesTable
+                try:
+                    self.view.propertiesTable.clear()
+                    self.view.propertiesTable.setRowCount(0)
+                    self.view.propertiesTable.setColumnCount(2)
+                    self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
+                except Exception:
+                    pass
+                
+                # Restaurar colores de nodos
+                for item in self.scene.items():
+                    if isinstance(item, NodoItem):
+                        item.set_normal_color()
+        return False
+    
+    # --- OBSERVER PATTERN: MÉTODOS PARA ACTUALIZACIÓN AUTOMÁTICA ---
+    def _conectar_señales_proyecto(self):
+        """Conecta las señales del proyecto para actualizar la UI automáticamente"""
+        if not self.proyecto:
+            return
+        
+        # Conectar señales de cambios
+        self.proyecto.nodo_agregado.connect(self._on_nodo_agregado)
+        self.proyecto.nodo_modificado.connect(self._on_nodo_modificado)
+        self.proyecto.ruta_agregada.connect(self._on_ruta_agregada)
+        self.proyecto.ruta_modificada.connect(self._on_ruta_modificada)
+        self.proyecto.proyecto_cambiado.connect(self._on_proyecto_cambiado)
+    
+    def _on_nodo_agregado(self, nodo):
+        """Se llama automáticamente cuando se agrega un nuevo nodo"""
+        print(f"Observer: Nodo {nodo.get('id')} agregado, actualizando UI...")
+        
+        # Inicializar visibilidad del nodo
+        self._inicializar_nodo_visibilidad(nodo, agregar_a_lista=True)
+        
+        # Actualizar rutas si existen
+        self._dibujar_rutas()
+    
+    def _on_nodo_modificado(self, nodo):
+        """Se llama automáticamente cuando se modifica un nodo"""
+        print(f"Observer: Nodo {nodo.get('id')} modificado, actualizando UI...")
+        
+        # Actualizar lista lateral del nodo
+        self.actualizar_lista_nodo(nodo)
+        
+        # Actualizar propiedades si el nodo está seleccionado
+        seleccionados = self.view.nodosList.selectedItems()
+        for i in range(self.view.nodosList.count()):
+            item = self.view.nodosList.item(i)
+            widget = self.view.nodosList.itemWidget(item)
+            if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo.get('id'):
+                if item.isSelected():
+                    self.mostrar_propiedades_nodo(nodo)
+                break
+        
+        # Actualizar rutas que contengan este nodo
+        self._dibujar_rutas()
+        
+        # Actualizar NodoItem visual si existe
+        for item in self.scene.items():
+            if isinstance(item, NodoItem) and item.nodo.get('id') == nodo.get('id'):
+                item.actualizar_objetivo()
+                item.actualizar_posicion()
+                break
+    
+    def _on_ruta_agregada(self, ruta):
+        """Se llama automáticamente cuando se agrega una nueva ruta"""
+        print("Observer: Ruta agregada, actualizando UI...")
+        
+        # Actualizar lista lateral de rutas
+        self._actualizar_lista_rutas_con_widgets()
+        
+        # Redibujar rutas
+        self._dibujar_rutas()
+        
+        # Actualizar relaciones nodo-ruta
+        self._actualizar_todas_relaciones_nodo_ruta()
+    
+    def _on_ruta_modificada(self, ruta):
+        """Se llama automáticamente cuando se modifica una ruta"""
+        print("Observer: Ruta modificada, actualizando UI...")
+        
+        # Actualizar lista lateral de rutas
+        self._actualizar_lista_rutas_con_widgets()
+        
+        # Redibujar rutas
+        self._dibujar_rutas()
+        
+        # Si hay una ruta seleccionada, actualizar sus propiedades
+        if hasattr(self.view, "rutasList") and self.view.rutasList.selectedItems():
+            for i in range(self.view.rutasList.count()):
+                item = self.view.rutasList.item(i)
+                if item.isSelected():
+                    widget = self.view.rutasList.itemWidget(item)
+                    if widget and hasattr(widget, 'ruta_index'):
+                        self.mostrar_propiedades_ruta(self.proyecto.rutas[widget.ruta_index])
+                        break
+    
+    def _on_proyecto_cambiado(self):
+        """Se llama automáticamente cuando hay cambios generales en el proyecto"""
+        print("Observer: Proyecto cambiado, actualizando relaciones...")
+        
+        # Actualizar relaciones nodo-ruta
+        self._actualizar_todas_relaciones_nodo_ruta()
+        
+        # Forzar actualización visual
+        self.view.marco_trabajo.viewport().update()
+    
+    def _actualizar_referencias_proyecto(self, proyecto):
+        """Actualiza todas las referencias al proyecto en controladores y subcontroladores"""
+        self.proyecto = proyecto
+        
+        # Actualizar en subcontroladores
+        self.mover_ctrl.proyecto = proyecto
+        self.colocar_ctrl.proyecto = proyecto
+        self.ruta_ctrl.proyecto = proyecto
+        
+        # Reconectar señales del nuevo proyecto
+        self._conectar_señales_proyecto()
+        
+        print("✓ Referencias del proyecto actualizadas en todos los controladores")
+
+    def forzar_actualizacion_cursor(self):
+        """Fuerza la actualización del cursor, útil para debug"""
+        print("=== FORZANDO ACTUALIZACIÓN DE CURSOR ===")
+        self._actualizar_cursor()
