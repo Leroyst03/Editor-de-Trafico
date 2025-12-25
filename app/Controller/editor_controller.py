@@ -112,18 +112,22 @@ class EditorController(QObject):
         # Movimiento actual en progreso (para guardar en historial)
         self.movimiento_actual = None  # {'nodo': nodo_item, 'x_inicial': x, 'y_inicial': y}
         
-        # --- SISTEMA DE VISIBILIDAD ---
-        self.visibilidad_nodos = {}  # {nodo_id: visible}
-        self.visibilidad_rutas = {}  # {ruta_index: visible}
+        # --- SISTEMA DE VISIBILIDAD MEJORADO CON RECONSTRUCCIÓN DE RUTAS ---
+        self.visibilidad_nodos = {}  # {nodo_id: visible} - Para UI
+        self.visibilidad_rutas = {}  # {ruta_index: visible} - Para líneas
+        self.nodo_en_rutas = {}  # {nodo_id: [ruta_index1, ...]} - Relaciones originales
         
-        # Diccionario para mantener qué rutas contienen cada nodo
-        self.nodo_en_rutas = {}  # {nodo_id: [ruta_index1, ruta_index2, ...]}
+        # NUEVO: Rutas reconstruidas para dibujo (excluyendo nodos ocultos)
+        self.rutas_para_dibujo = []  # Lista de rutas reconstruidas para dibujar
         
-        # Conectar botones de visibilidad
+        # --- CAMBIO: Conectar botones de visibilidad como interruptores ---
         if hasattr(self.view, "btnOcultarTodo"):
-            self.view.btnOcultarTodo.clicked.connect(self.ocultar_todo)
+            self.view.btnOcultarTodo.setText("Ocultar Nodos")  # Cambiar texto inicial
+            self.view.btnOcultarTodo.clicked.connect(self.toggle_visibilidad_nodos)
         if hasattr(self.view, "btnMostrarTodo"):
-            self.view.btnMostrarTodo.clicked.connect(self.mostrar_todo)
+            self.view.btnMostrarTodo.setText("Ocultar Rutas")  # Cambiar texto inicial
+            self.view.btnMostrarTodo.clicked.connect(self.toggle_visibilidad_rutas)
+            self.view.btnMostrarTodo.setEnabled(True)  # Inicialmente habilitado
         
         # Si hay proyecto inicial, configurarlo
         if self.proyecto:
@@ -314,6 +318,13 @@ class EditorController(QObject):
         self.visibilidad_nodos.clear()
         self.visibilidad_rutas.clear()
         self.nodo_en_rutas.clear()
+        
+        # Resetear textos y estados de botones de visibilidad
+        if hasattr(self.view, "btnOcultarTodo"):
+            self.view.btnOcultarTodo.setText("Ocultar Nodos")
+        if hasattr(self.view, "btnMostrarTodo"):
+            self.view.btnMostrarTodo.setText("Ocultar Rutas")
+            self.view.btnMostrarTodo.setEnabled(True)  # Habilitado inicialmente
         
         print("✓ UI completamente limpiada para nuevo proyecto")
 
@@ -1089,7 +1100,40 @@ class EditorController(QObject):
             if nodo_id not in self.nodo_en_rutas:
                 self.nodo_en_rutas[nodo_id] = []
             
-            # 3. Agregar a la lista lateral con widget de visibilidad
+            # 3. Buscar en rutas existentes si este nodo está en alguna
+            for idx, ruta in enumerate(self.proyecto.rutas):
+                try:
+                    ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+                except Exception:
+                    ruta_dict = ruta
+                
+                self._normalize_route_nodes(ruta_dict)
+                
+                # Verificar si la ruta contiene este nodo
+                contiene_nodo = False
+                
+                # Origen
+                origen = ruta_dict.get("origen")
+                if origen and isinstance(origen, dict) and origen.get('id') == nodo_id:
+                    contiene_nodo = True
+                
+                # Destino
+                destino = ruta_dict.get("destino")
+                if not contiene_nodo and destino and isinstance(destino, dict) and destino.get('id') == nodo_id:
+                    contiene_nodo = True
+                
+                # Visita
+                if not contiene_nodo:
+                    for nodo_visita in ruta_dict.get("visita", []):
+                        if isinstance(nodo_visita, dict) and nodo_visita.get('id') == nodo_id:
+                            contiene_nodo = True
+                            break
+                
+                if contiene_nodo:
+                    if idx not in self.nodo_en_rutas[nodo_id]:
+                        self.nodo_en_rutas[nodo_id].append(idx)
+            
+            # 4. Agregar a la lista lateral con widget de visibilidad
             if agregar_a_lista:
                 x_px = nodo.get('X', 0)
                 y_px = nodo.get('Y', 0)
@@ -1774,7 +1818,7 @@ class EditorController(QObject):
 
     # --- Dibujar rutas guardadas en rojo --
     def _dibujar_rutas(self):
-        """Dibuja todas las rutas con REPARACIÓN PREVIA de referencias"""
+        """Dibuja todas las rutas usando la reconstrucción de rutas"""
         try:
             self._clear_route_lines()
         except Exception as e:
@@ -1787,59 +1831,27 @@ class EditorController(QObject):
         # REPARAR REFERENCIAS ANTES DE DIBUJAR
         self._reparar_referencias_rutas()
 
+        # Reconstruir rutas para dibujo (excluyendo nodos ocultos)
+        self.rutas_para_dibujo = self._reconstruir_rutas_para_dibujo()
+        
         pen = QPen(Qt.red, 2)
         pen.setCosmetic(True)
         self._route_lines = []
 
-        for ruta_idx, ruta in enumerate(self.proyecto.rutas):
-            # Verificar si la ruta está visible
-            if not self.visibilidad_rutas.get(ruta_idx, True):
-                continue
-                
-            try:
-                ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
-            except Exception as e:
-                print(f"Error convirtiendo ruta {ruta_idx}: {e}")
-                ruta_dict = ruta
-
-            # NORMALIZACIÓN (ahora debería funcionar porque las referencias están reparadas)
-            self._normalize_route_nodes(ruta_dict)
-            
-            # ACTUALIZAR LA RUTA EN EL PROYECTO
-            self.proyecto.rutas[ruta_idx] = ruta_dict
-
-            # Obtener puntos ACTUALIZADOS
-            puntos = []
-            if ruta_dict.get("origen"):
-                puntos.append(ruta_dict["origen"])
-            puntos.extend(ruta_dict.get("visita", []) or [])
-            if ruta_dict.get("destino"):
-                puntos.append(ruta_dict["destino"])
-
-            if len(puntos) < 2:
-                print(f"DEBUG: Ruta {ruta_idx} tiene menos de 2 puntos")
-                self._route_lines.append([])
-                continue
-
-            # Verificar que todos los nodos de la ruta estén visibles
-            todos_visibles = True
-            for punto in puntos:
-                if isinstance(punto, dict):
-                    nodo_id = punto.get('id')
-                    if nodo_id is not None and not self.visibilidad_nodos.get(nodo_id, True):
-                        todos_visibles = False
-                        break
-            
-            if not todos_visibles:
+        for ruta_idx, ruta_reconstruida in enumerate(self.rutas_para_dibujo):
+            if not ruta_reconstruida or len(ruta_reconstruida) < 2:
+                # Ruta vacía o con insuficientes nodos
                 self._route_lines.append([])
                 continue
 
             route_line_items = []
-            for i in range(len(puntos) - 1):
-                n1, n2 = puntos[i], puntos[i + 1]
+            
+            # Dibujar segmentos entre nodos consecutivos en la ruta reconstruida
+            for i in range(len(ruta_reconstruida) - 1):
+                n1, n2 = ruta_reconstruida[i], ruta_reconstruida[i + 1]
                 
                 try:
-                    # Obtener coordenadas - FORZAR actualización
+                    # Obtener coordenadas
                     x1 = n1.get("X", 0) if isinstance(n1, dict) else getattr(n1, "X", 0)
                     y1 = n1.get("Y", 0) if isinstance(n1, dict) else getattr(n1, "Y", 0)
                     x2 = n2.get("X", 0) if isinstance(n2, dict) else getattr(n2, "X", 0)
@@ -1859,6 +1871,7 @@ class EditorController(QObject):
             self._route_lines.append(route_line_items)
 
         self.view.marco_trabajo.viewport().update()
+        print(f"✓ {len([r for r in self.rutas_para_dibujo if r])} rutas dibujadas (reconstruidas)")
 
     # --- Propiedades de nodo en QListWidget editable ---
     def mostrar_propiedades_nodo(self, nodo):
@@ -3041,7 +3054,6 @@ class EditorController(QObject):
         print("="*50)
 
     # --- SISTEMA DE VISIBILIDAD CON LÓGICA DE RUTAS INCLUYENDO NODOS ---
-    
     def inicializar_visibilidad(self):
         """Inicializa el sistema de visibilidad para todos los elementos"""
         if not self.proyecto:
@@ -3049,17 +3061,17 @@ class EditorController(QObject):
         
         print("Inicializando sistema de visibilidad...")
         
-        # Inicializar visibilidad de nodos
+        # Inicializar visibilidad de nodos como VISIBLES (True)
         for nodo in self.proyecto.nodos:
             nodo_id = nodo.get('id')
             if nodo_id is not None:
-                self.visibilidad_nodos[nodo_id] = True
-                print(f"  - Nodo {nodo_id}: visibilidad inicializada")
+                self.visibilidad_nodos[nodo_id] = True  # Inicialmente visibles
+                print(f"  - Nodo {nodo_id}: visibilidad = True")
         
-        # Inicializar visibilidad de rutas
+        # Inicializar visibilidad de rutas como VISIBLES (True)
         for idx in range(len(self.proyecto.rutas)):
-            self.visibilidad_rutas[idx] = True
-            print(f"  - Ruta {idx}: visibilidad inicializada")
+            self.visibilidad_rutas[idx] = True  # Inicialmente visibles
+            print(f"  - Ruta {idx}: visibilidad = True")
             
         # Inicializar relaciones nodo-ruta
         self._actualizar_todas_relaciones_nodo_ruta()
@@ -3068,7 +3080,193 @@ class EditorController(QObject):
         self._actualizar_lista_nodos_con_widgets()
         self._actualizar_lista_rutas_con_widgets()
         
+        # Asegurar que los botones muestren el estado inicial correcto
+        if hasattr(self.view, "btnOcultarTodo"):
+            self.view.btnOcultarTodo.setText("Ocultar Nodos")
+        if hasattr(self.view, "btnMostrarTodo"):
+            self.view.btnMostrarTodo.setText("Ocultar Rutas")
+            self.view.btnMostrarTodo.setEnabled(True)  # Habilitado porque nodos visibles
+        
         print("✓ Sistema de visibilidad inicializado")
+
+    # --- NUEVOS MÉTODOS PARA INTERRUPTORES DE VISIBILIDAD ---
+    def toggle_visibilidad_nodos(self):
+        """Alterna la visibilidad de TODOS los nodos (y por tanto de TODAS las rutas)"""
+        if not self.proyecto:
+            return
+        
+        # Verificar si actualmente los nodos están visibles
+        nodos_visibles = any(self.visibilidad_nodos.values()) if self.visibilidad_nodos else False
+        
+        if nodos_visibles:
+            # Si están visibles, ocultar TODOS los nodos y TODAS las rutas
+            self.ocultar_todos_los_nodos()
+            self.view.btnOcultarTodo.setText("Mostrar Nodos")
+            # Deshabilitar botón de rutas porque no hay nodos visibles
+            if hasattr(self.view, "btnMostrarTodo"):
+                self.view.btnMostrarTodo.setEnabled(False)
+                self.view.btnMostrarTodo.setText("Ocultar Rutas")  # Resetear texto
+        else:
+            # Si están ocultos, mostrar TODOS los nodos y TODAS las rutas
+            self.mostrar_todos_los_nodos_y_rutas()
+            self.view.btnOcultarTodo.setText("Ocultar Nodos")
+            # Habilitar botón de rutas porque ahora hay nodos visibles
+            if hasattr(self.view, "btnMostrarTodo"):
+                self.view.btnMostrarTodo.setEnabled(True)
+                self.view.btnMostrarTodo.setText("Ocultar Rutas")  # Resetear a estado inicial
+
+    def toggle_visibilidad_rutas(self):
+        """Alterna la visibilidad de TODAS las rutas (solo funciona si los nodos están visibles)"""
+        if not self.proyecto:
+            return
+        
+        # Verificar que los nodos estén visibles
+        nodos_visibles = any(self.visibilidad_nodos.values()) if self.visibilidad_nodos else False
+        if not nodos_visibles:
+            print("⚠ No se pueden mostrar/ocultar rutas porque los nodos están ocultos")
+            return
+        
+        # Verificar si actualmente las rutas están visibles
+        rutas_visibles = any(self.visibilidad_rutas.values()) if self.visibilidad_rutas else False
+        
+        if rutas_visibles:
+            # Si están visibles, ocultar solo las líneas de ruta
+            self.ocultar_todas_las_rutas()
+            self.view.btnMostrarTodo.setText("Mostrar Rutas")
+        else:
+            # Si están ocultas, mostrar las líneas de ruta
+            self.mostrar_todas_las_rutas()
+            self.view.btnMostrarTodo.setText("Ocultar Rutas")
+
+    def ocultar_todos_los_nodos(self):
+        """Oculta TODOS los nodos y TODAS las rutas"""
+        print("Ocultando todos los nodos y rutas...")
+        
+        # Ocultar todos los nodos en la escena
+        for item in self.scene.items():
+            if isinstance(item, NodoItem):
+                item.setVisible(False)
+                nodo_id = item.nodo.get('id')
+                if nodo_id is not None:
+                    self.visibilidad_nodos[nodo_id] = False
+        
+        # Ocultar todas las rutas (porque dependen de nodos)
+        for idx in range(len(self.proyecto.rutas)):
+            self.visibilidad_rutas[idx] = False
+        
+        # Limpiar líneas de rutas
+        self._clear_route_lines()
+        self._clear_highlight_lines()
+        
+        # Actualizar widgets en las listas
+        self._actualizar_lista_nodos_con_widgets()
+        self._actualizar_lista_rutas_con_widgets()
+        
+        # Deseleccionar cualquier ruta seleccionada
+        if hasattr(self.view, "rutasList"):
+            self.view.rutasList.clearSelection()
+        
+        # Resetear el índice de ruta seleccionada
+        self.ruta_actual_idx = None
+        
+        # Limpiar tabla de propiedades
+        self.view.propertiesTable.clear()
+        self.view.propertiesTable.setRowCount(0)
+        self.view.propertiesTable.setColumnCount(2)
+        self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
+        
+        # Restaurar colores normales de TODOS los nodos
+        for item in self.scene.items():
+            if isinstance(item, NodoItem):
+                item.set_normal_color()
+        
+        print("✓ Todos los nodos y rutas ocultados")
+
+    def mostrar_todos_los_nodos_y_rutas(self):
+        """Muestra TODOS los nodos y TODAS las rutas (fuerza mostrar rutas)"""
+        print("Mostrando todos los nodos y rutas...")
+        
+        # Mostrar todos los nodos en la escena
+        for item in self.scene.items():
+            if isinstance(item, NodoItem):
+                item.setVisible(True)
+                nodo_id = item.nodo.get('id')
+                if nodo_id is not None:
+                    self.visibilidad_nodos[nodo_id] = True
+        
+        # Mostrar TODAS las rutas (forzar estado visible)
+        for idx in range(len(self.proyecto.rutas)):
+            self.visibilidad_rutas[idx] = True
+        
+        # Actualizar widgets en las listas
+        self._actualizar_lista_nodos_con_widgets()
+        self._actualizar_lista_rutas_con_widgets()
+        
+        # Redibujar rutas
+        self._dibujar_rutas()
+        
+        print("✓ Todos los nodos y rutas mostrados")
+
+    def ocultar_todas_las_rutas(self):
+        """Oculta solo las líneas de las rutas, manteniendo los nodos visibles"""
+        print("Ocultando todas las rutas (líneas)...")
+        
+        # Ocultar todas las rutas
+        for idx in range(len(self.proyecto.rutas)):
+            self.visibilidad_rutas[idx] = False
+        
+        # Limpiar líneas de rutas
+        self._clear_route_lines()
+        self._clear_highlight_lines()
+        
+        # Actualizar widgets en la lista de rutas
+        self._actualizar_lista_rutas_con_widgets()
+        
+        # Deseleccionar cualquier ruta seleccionada
+        if hasattr(self.view, "rutasList"):
+            self.view.rutasList.clearSelection()
+        
+        # Resetear el índice de ruta seleccionada
+        self.ruta_actual_idx = None
+        
+        # Restaurar colores normales de TODOS los nodos
+        for item in self.scene.items():
+            if isinstance(item, NodoItem):
+                item.set_normal_color()
+        
+        print("✓ Todas las rutas (líneas) ocultadas")
+
+    def mostrar_todas_las_rutas(self):
+        """Muestra todas las líneas de las rutas (solo si los nodos están visibles)"""
+        print("Mostrando todas las rutas (líneas)...")
+        
+        # Mostrar todas las rutas
+        for idx in range(len(self.proyecto.rutas)):
+            self.visibilidad_rutas[idx] = True
+        
+        # Redibujar rutas (solo se dibujarán si los nodos están visibles)
+        self._dibujar_rutas()
+        
+        # Actualizar widgets en la lista de rutas
+        self._actualizar_lista_rutas_con_widgets()
+        
+        print("✓ Todas las rutas (líneas) mostradas")
+
+    # --- MÉTODOS COMPATIBLES (actualizados) ---
+    def ocultar_todo(self):
+        """Método compatible - oculta nodos y rutas"""
+        self.ocultar_todos_los_nodos()
+        self.view.btnOcultarTodo.setText("Mostrar Nodos")
+        if hasattr(self.view, "btnMostrarTodo"):
+            self.view.btnMostrarTodo.setEnabled(False)
+
+    def mostrar_todo(self):
+        """Método compatible - muestra nodos y rutas"""
+        self.mostrar_todos_los_nodos_y_rutas()
+        self.view.btnOcultarTodo.setText("Ocultar Nodos")
+        if hasattr(self.view, "btnMostrarTodo"):
+            self.view.btnMostrarTodo.setEnabled(True)
+            self.view.btnMostrarTodo.setText("Ocultar Rutas")
     
     def _actualizar_todas_relaciones_nodo_ruta(self):
         """Actualiza todas las relaciones entre nodos y rutas"""
@@ -3104,8 +3302,8 @@ class EditorController(QObject):
                     if ruta_idx not in self.nodo_en_rutas[nodo_id]:
                         self.nodo_en_rutas[nodo_id].append(ruta_idx)
     
-    def _obtener_nodos_de_ruta(self, ruta_idx):
-        """Obtiene todos los nodos de una ruta específica"""
+    def _obtener_nodos_de_ruta(self, ruta_idx, solo_visibles=False):
+        """Obtiene todos los nodos de una ruta específica, opcionalmente solo los visibles"""
         if ruta_idx >= len(self.proyecto.rutas):
             return []
         
@@ -3118,11 +3316,24 @@ class EditorController(QObject):
         self._normalize_route_nodes(ruta_dict)
         
         nodos = []
-        if ruta_dict.get("origen"):
-            nodos.append(ruta_dict["origen"])
-        nodos.extend(ruta_dict.get("visita", []) or [])
-        if ruta_dict.get("destino"):
-            nodos.append(ruta_dict["destino"])
+        
+        # Origen
+        origen = ruta_dict.get("origen")
+        if origen:
+            if not solo_visibles or (isinstance(origen, dict) and self.visibilidad_nodos.get(origen.get('id'), True)):
+                nodos.append(origen)
+        
+        # Visita
+        visita = ruta_dict.get("visita", []) or []
+        for nodo_visita in visita:
+            if not solo_visibles or (isinstance(nodo_visita, dict) and self.visibilidad_nodos.get(nodo_visita.get('id'), True)):
+                nodos.append(nodo_visita)
+        
+        # Destino
+        destino = ruta_dict.get("destino")
+        if destino:
+            if not solo_visibles or (isinstance(destino, dict) and self.visibilidad_nodos.get(destino.get('id'), True)):
+                nodos.append(destino)
         
         return nodos
     
@@ -3257,7 +3468,7 @@ class EditorController(QObject):
         print("✓ Todos los elementos mostrados")
     
     def toggle_visibilidad_nodo(self, nodo_id):
-        """Alterna la visibilidad de un nodo específico"""
+        """Alterna la visibilidad de un nodo específico y reconstruye rutas"""
         if not self.proyecto:
             return
         
@@ -3276,18 +3487,105 @@ class EditorController(QObject):
                     item.setVisible(nuevo_estado)
                     break
         
-        # Si el nodo está siendo ocultado, verificar si afecta a rutas
+        # Obtener lista de rutas que contienen este nodo
+        rutas_con_nodo = self.nodo_en_rutas.get(nodo_id, [])
+        
         if not nuevo_estado:
-            # Actualizar rutas que dependen de este nodo
-            self._dibujar_rutas()
+            # Si estamos OCULTANDO el nodo
+            print(f"Ocultando nodo {nodo_id} - Rutas afectadas: {rutas_con_nodo}")
+            print(f"  Se reconstruirán {len(rutas_con_nodo)} rutas saltando nodo {nodo_id}")
+            
+            # Si el nodo está siendo ocultado y está seleccionado, deseleccionarlo
+            for item in self.scene.selectedItems():
+                if isinstance(item, NodoItem) and item.nodo.get('id') == nodo_id:
+                    item.setSelected(False)
+                    break
+            
+            # Deseleccionar en la lista lateral
+            for i in range(self.view.nodosList.count()):
+                item = self.view.nodosList.item(i)
+                widget = self.view.nodosList.itemWidget(item)
+                if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo_id:
+                    self.view.nodosList.setCurrentItem(None)
+                    break
+            
+            # Limpiar tabla de propiedades si este nodo estaba seleccionado
+            seleccionados = self.view.nodosList.selectedItems()
+            if not seleccionados:
+                self.view.propertiesTable.clear()
+                self.view.propertiesTable.setRowCount(0)
+                self.view.propertiesTable.setColumnCount(2)
+                self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
+        
+        else:
+            # Si estamos MOSTRANDO el nodo
+            print(f"Mostrando nodo {nodo_id} - Reconstruyendo rutas: {rutas_con_nodo}")
+            print(f"  Se reconstruirán {len(rutas_con_nodo)} rutas incluyendo nodo {nodo_id}")
+            
+            # El nodo se incluirá automáticamente en la reconstrucción
         
         # Actualizar widget en la lista
         self._actualizar_widget_nodo_en_lista(nodo_id)
         
-        print(f"Visibilidad nodo {nodo_id}: {nuevo_estado}")
-    
+        # Reconstruir y dibujar rutas
+        self._dibujar_rutas()
+        
+        # Si hay una ruta seleccionada y contiene este nodo, actualizar sus highlights
+        if self.ruta_actual_idx is not None and self.ruta_actual_idx in rutas_con_nodo:
+            self.seleccionar_ruta_desde_lista()
+        
+        print(f"✓ Visibilidad nodo {nodo_id}: {nuevo_estado}")
+        print(f"  Rutas reconstruidas: {[i for i in rutas_con_nodo if i < len(self.rutas_para_dibujo) and self.rutas_para_dibujo[i]]}")
+        
+    def _actualizar_relaciones_nodo_visible(self, nodo_id):
+        """Reconstruye relaciones cuando un nodo se vuelve visible"""
+        if not self.proyecto:
+            return
+        
+        # Limpiar relaciones antiguas
+        if nodo_id in self.nodo_en_rutas:
+            self.nodo_en_rutas[nodo_id] = []
+        
+        # Buscar en todas las rutas si contienen este nodo
+        for idx, ruta in enumerate(self.proyecto.rutas):
+            try:
+                ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+            except Exception:
+                ruta_dict = ruta
+            
+            self._normalize_route_nodes(ruta_dict)
+            
+            # Verificar si la ruta contiene el nodo
+            nodo_encontrado = False
+            
+            # Verificar origen
+            origen = ruta_dict.get("origen")
+            if origen and isinstance(origen, dict) and origen.get('id') == nodo_id:
+                nodo_encontrado = True
+            
+            # Verificar destino
+            destino = ruta_dict.get("destino")
+            if not nodo_encontrado and destino and isinstance(destino, dict) and destino.get('id') == nodo_id:
+                nodo_encontrado = True
+            
+            # Verificar visita
+            if not nodo_encontrado:
+                for nodo_visita in ruta_dict.get("visita", []):
+                    if isinstance(nodo_visita, dict) and nodo_visita.get('id') == nodo_id:
+                        nodo_encontrado = True
+                        break
+            
+            # Si la ruta contiene el nodo, agregar a relaciones
+            if nodo_encontrado:
+                if nodo_id not in self.nodo_en_rutas:
+                    self.nodo_en_rutas[nodo_id] = []
+                if idx not in self.nodo_en_rutas[nodo_id]:
+                    self.nodo_en_rutas[nodo_id].append(idx)
+        
+        print(f"✓ Relaciones actualizadas para nodo {nodo_id}: {self.nodo_en_rutas.get(nodo_id, [])}")
+
     def toggle_visibilidad_ruta(self, ruta_index):
-        """Alterna la visibilidad de una ruta específica, incluyendo sus nodos"""
+        """Alterna la visibilidad de una ruta específica (SOLO líneas, como el botón global)"""
         if not self.proyecto or ruta_index >= len(self.proyecto.rutas):
             return
         
@@ -3295,37 +3593,12 @@ class EditorController(QObject):
         if ruta_index not in self.visibilidad_rutas:
             self.visibilidad_rutas[ruta_index] = True
         
-        # Alternar estado
+        # Alternar estado (solo visibilidad de líneas)
         nuevo_estado = not self.visibilidad_rutas[ruta_index]
         self.visibilidad_rutas[ruta_index] = nuevo_estado
         
-        # Obtener todos los nodos de esta ruta
-        nodos_ruta = self._obtener_nodos_de_ruta(ruta_index)
-        
-        if nuevo_estado:
-            # Mostrar la ruta: mostrar todos sus nodos
-            for nodo in nodos_ruta:
-                if isinstance(nodo, dict):
-                    nodo_id = nodo.get('id')
-                    if nodo_id is not None:
-                        self.visibilidad_nodos[nodo_id] = True
-                        # Buscar y mostrar el NodoItem
-                        for item in self.scene.items():
-                            if isinstance(item, NodoItem) and item.nodo.get('id') == nodo_id:
-                                item.setVisible(True)
-                                break
-        else:
-            # Ocultar la ruta: ocultar todos sus nodos
-            for nodo in nodos_ruta:
-                if isinstance(nodo, dict):
-                    nodo_id = nodo.get('id')
-                    if nodo_id is not None:
-                        self.visibilidad_nodos[nodo_id] = False
-                        # Buscar y ocultar el NodoItem
-                        for item in self.scene.items():
-                            if isinstance(item, NodoItem) and item.nodo.get('id') == nodo_id:
-                                item.setVisible(False)
-                                break
+        # IMPORTANTE: NO MODIFICAR LA VISIBILIDAD DE LOS NODOS
+        # Solo afectamos a las líneas de la ruta
         
         # Actualizar visualización de rutas
         self._dibujar_rutas()
@@ -3335,27 +3608,23 @@ class EditorController(QObject):
             # Limpiar las líneas amarillas de resaltado
             self._clear_highlight_lines()
             
-            # Restaurar colores normales de los nodos
+            # Restaurar colores normales de los nodos de esta ruta (pero los nodos siguen visibles)
+            nodos_ruta = self._obtener_nodos_de_ruta(ruta_index)
             for nodo in nodos_ruta:
                 if isinstance(nodo, dict):
                     nodo_id = nodo.get('id')
                     if nodo_id is not None:
                         for item in self.scene.items():
                             if isinstance(item, NodoItem) and item.nodo.get('id') == nodo_id:
-                                item.set_normal_color()
+                                # Solo restaurar color si no está seleccionado por otra razón
+                                if not item.isSelected():
+                                    item.set_normal_color()
                                 break
         
-        # Actualizar widgets en las listas
+        # Actualizar widget en la lista
         self._actualizar_widget_ruta_en_lista(ruta_index)
         
-        # Actualizar widgets de nodos afectados
-        for nodo in nodos_ruta:
-            if isinstance(nodo, dict):
-                nodo_id = nodo.get('id')
-                if nodo_id is not None:
-                    self._actualizar_widget_nodo_en_lista(nodo_id)
-        
-        print(f"Visibilidad ruta {ruta_index}: {nuevo_estado}")
+        print(f"Visibilidad ruta {ruta_index}: {nuevo_estado} (solo líneas)")
     
     def _actualizar_widget_nodo_en_lista(self, nodo_id):
         """Actualiza el widget de un nodo en la lista lateral"""
@@ -3834,3 +4103,97 @@ class EditorController(QObject):
         """Fuerza la actualización del cursor, útil para debug"""
         print("=== FORZANDO ACTUALIZACIÓN DE CURSOR ===")
         self._actualizar_cursor()
+
+
+    def _reconstruir_rutas_para_dibujo(self):
+        """
+        Reconstruye todas las rutas excluyendo nodos ocultos.
+        Similar a _reconfigurar_rutas_por_eliminacion pero temporal.
+        """
+        if not self.proyecto:
+            return []
+        
+        rutas_reconstruidas = []
+        
+        for ruta_idx, ruta in enumerate(self.proyecto.rutas):
+            # Verificar si la ruta está visible globalmente
+            if not self.visibilidad_rutas.get(ruta_idx, True):
+                rutas_reconstruidas.append([])  # Ruta completamente oculta
+                continue
+                
+            try:
+                ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+            except Exception:
+                ruta_dict = ruta
+            
+            # Normalizar la ruta
+            self._normalize_route_nodes(ruta_dict)
+            
+            # Obtener todos los nodos de la ruta en orden
+            puntos_completos = []
+            if ruta_dict.get("origen"):
+                puntos_completos.append(ruta_dict["origen"])
+            puntos_completos.extend(ruta_dict.get("visita", []) or [])
+            if ruta_dict.get("destino"):
+                puntos_completos.append(ruta_dict["destino"])
+            
+            # Filtrar solo nodos visibles
+            puntos_visibles = []
+            for punto in puntos_completos:
+                if isinstance(punto, dict):
+                    nodo_id = punto.get('id')
+                    if nodo_id is not None and self.visibilidad_nodos.get(nodo_id, True):
+                        puntos_visibles.append(punto)
+            
+            # Reconstruir ruta excluyendo nodos ocultos
+            ruta_reconstruida = self._reconstruir_ruta_saltando_nodos_ocultos(puntos_completos, puntos_visibles)
+            rutas_reconstruidas.append(ruta_reconstruida)
+        
+        return rutas_reconstruidas
+    
+    def _reconstruir_ruta_saltando_nodos_ocultos(self, puntos_completos, puntos_visibles):
+        """
+        Reconstruye una ruta saltando nodos ocultos, similar a cuando se elimina un nodo.
+        
+        Args:
+            puntos_completos: Todos los nodos de la ruta en orden
+            puntos_visibles: Solo los nodos visibles de la ruta
+        
+        Returns:
+            Lista de nodos para dibujar la ruta (puede tener menos nodos que la original)
+        """
+        if len(puntos_visibles) == len(puntos_completos):
+            # Todos los nodos visibles, ruta intacta
+            return puntos_completos
+        
+        if len(puntos_visibles) < 2:
+            # No hay suficientes nodos visibles para dibujar una ruta
+            return []
+        
+        # Crear mapa de visibilidad por índice
+        visibilidad_por_indice = []
+        for punto in puntos_completos:
+            if isinstance(punto, dict):
+                nodo_id = punto.get('id')
+                visible = nodo_id is not None and self.visibilidad_nodos.get(nodo_id, True)
+            else:
+                visible = False
+            visibilidad_por_indice.append(visible)
+        
+        # Reconstruir ruta saltando nodos ocultos
+        ruta_reconstruida = []
+        
+        for i, punto in enumerate(puntos_completos):
+            if not visibilidad_por_indice[i]:
+                # Nodo oculto, omitirlo
+                continue
+                
+            if i == 0 or i == len(puntos_completos) - 1:
+                # Origen o destino: siempre incluirlo si está visible
+                ruta_reconstruida.append(punto)
+            else:
+                # Nodo intermedio: incluirlo si está visible
+                ruta_reconstruida.append(punto)
+        
+        # Si después de reconstruir tenemos menos de 2 nodos, retornar vacío
+        return ruta_reconstruida if len(ruta_reconstruida) >= 2 else []
