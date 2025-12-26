@@ -13,7 +13,7 @@ class NodoItem(QGraphicsObject):
     hover_entered = pyqtSignal(object)  # Emite self cuando el ratón entra
     hover_leaved = pyqtSignal(object)   # Emite self cuando el ratón sale
 
-    def __init__(self, nodo: Nodo, size=35, editor=None):  # Tamaño moderado para mejor visibilidad
+    def __init__(self, nodo: Nodo, size=35, editor=None):
         super().__init__()
         self.nodo = nodo
         self.size = size
@@ -52,6 +52,7 @@ class NodoItem(QGraphicsObject):
         self._cargar_pixmap = None
         self._descargar_pixmap = None
         self._cargador_pixmap = None
+        self._cargador_io_pixmap = None  # Nuevo: icono para objetivo = 3
         self._cargar_icono_optimizado()
         
         # Obtener parámetros del nodo
@@ -80,32 +81,12 @@ class NodoItem(QGraphicsObject):
         if image.format() != QImage.Format_ARGB32:
             image = image.convertToFormat(QImage.Format_ARGB32)
         
-        # Si la imagen es muy pequeña o muy grande, escalar en dos pasos
-        original_width = image.width()
-        original_height = image.height()
-        
-        # Determinar el mejor enfoque de escalado
-        if original_width < target_size * 0.5 or original_width > target_size * 2:
-            # Escalar a un tamaño intermedio (múltiplo de 2)
-            intermediate_size = target_size * 2
-            scaled_image = image.scaled(
-                intermediate_size, intermediate_size,
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
-            )
-            # Luego escalar al tamaño final
-            scaled_image = scaled_image.scaled(
-                target_size, target_size,
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
-            )
-        else:
-            # Escalar directamente al tamaño deseado
-            scaled_image = image.scaled(
-                target_size, target_size,
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
-            )
+        # Escalar directamente al tamaño deseado con alta calidad
+        scaled_image = image.scaled(
+            target_size, target_size,
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation
+        )
         
         return QPixmap.fromImage(scaled_image)
 
@@ -116,11 +97,14 @@ class NodoItem(QGraphicsObject):
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             icon_dir = os.path.join(base_dir, "Static", "Icons")
             
+            # Tamaño para iconos - hacerlos más grandes que el nodo para mejor visibilidad
+            icon_target_size = int(self.size * 1.8)  # 63px para nodos de 35px
+            
             # Lista de tamaños preferidos (de mayor a menor calidad)
             preferred_sizes = [
-                self.size * 4,  # 140x140 para 35px final (alta densidad)
-                self.size * 2,  # 70x70
-                self.size,      # 35x35
+                icon_target_size * 4,  # Tamaño más grande para mejor calidad
+                icon_target_size * 2,
+                icon_target_size,
                 128,            # Tamaño estándar
                 64,
                 32
@@ -135,20 +119,20 @@ class NodoItem(QGraphicsObject):
                     specific_path = os.path.join(specific_dir, f"{nombre}.png")
                     if os.path.exists(specific_path):
                         print(f"✓ Encontrado {nombre} en tamaño específico {size}x{size}")
-                        return self._cargar_png_con_calidad(specific_path, self.size)
+                        return self._cargar_png_con_calidad(specific_path, icon_target_size)
                 
                 # 2. Buscar en la raíz con tamaño específico en nombre (ej: "cargar_70x70.png")
                 for size in preferred_sizes:
                     sized_path = os.path.join(icon_dir, f"{nombre}_{size}x{size}.png")
                     if os.path.exists(sized_path):
                         print(f"✓ Encontrado {nombre}_{size}x{size}.png")
-                        return self._cargar_png_con_calidad(sized_path, self.size)
+                        return self._cargar_png_con_calidad(sized_path, icon_target_size)
                 
                 # 3. Buscar en la raíz sin tamaño
                 root_path = os.path.join(icon_dir, f"{nombre}.png")
                 if os.path.exists(root_path):
                     print(f"✓ Encontrado {nombre}.png en raíz")
-                    return self._cargar_png_con_calidad(root_path, self.size)
+                    return self._cargar_png_con_calidad(root_path, icon_target_size)
                 
                 return None
             
@@ -156,6 +140,8 @@ class NodoItem(QGraphicsObject):
             self._cargar_pixmap = encontrar_mejor_icono("cargar")
             self._descargar_pixmap = encontrar_mejor_icono("descargar")
             self._cargador_pixmap = encontrar_mejor_icono("bateria")
+            # Cargar icono para objetivo = 3
+            self._cargador_io_pixmap = encontrar_mejor_icono("cargadorIO")
             
             # Si algún icono no se encontró, crear alternativo
             if self._cargar_pixmap is None or self._cargar_pixmap.isNull():
@@ -169,6 +155,10 @@ class NodoItem(QGraphicsObject):
             if self._cargador_pixmap is None or self._cargador_pixmap.isNull():
                 self._cargador_pixmap = self._crear_icono_vectorial("cargador")
                 print("⚠ Creado icono alternativo para 'bateria'")
+            
+            if self._cargador_io_pixmap is None or self._cargador_io_pixmap.isNull():
+                self._cargador_io_pixmap = self._crear_icono_vectorial("cargadorIO")
+                print("⚠ Creado icono alternativo para 'cargadorIO'")
                 
         except Exception as e:
             print(f"Error cargando iconos optimizados: {e}")
@@ -176,11 +166,12 @@ class NodoItem(QGraphicsObject):
             self._cargar_pixmap = self._crear_icono_vectorial("cargar")
             self._descargar_pixmap = self._crear_icono_vectorial("descargar")
             self._cargador_pixmap = self._crear_icono_vectorial("cargador")
+            self._cargador_io_pixmap = self._crear_icono_vectorial("cargadorIO")
 
     def _crear_icono_vectorial(self, tipo):
         """Crea iconos vectoriales personalizados con alta calidad"""
-        # Crear a mayor resolución para luego escalar
-        canvas_size = self.size * 4  # Crear a 4x la resolución
+        # Crear a mayor resolución para mejor calidad
+        canvas_size = int(self.size * 2)  # Crear a 2x la resolución
         pixmap = QPixmap(canvas_size, canvas_size)
         pixmap.fill(Qt.transparent)
         
@@ -194,21 +185,13 @@ class NodoItem(QGraphicsObject):
         
         rect = QRectF(0, 0, canvas_size, canvas_size)
         
-        # Configuración común
-        border_width = 4  # Ancho del borde a alta resolución
-        
         if tipo == "cargar":
             # Icono de cargar (flecha arriba)
             color = QColor(0, 150, 0)  # Verde oscuro
             
-            # Dibujar círculo de fondo
-            painter.setBrush(QBrush(color))
-            painter.setPen(QPen(Qt.black, border_width))
-            painter.drawEllipse(rect.adjusted(border_width, border_width, -border_width, -border_width))
-            
-            # Dibujar flecha hacia arriba
+            # Dibujar flecha hacia arriba - SIN círculo de fondo
             center = rect.center()
-            arrow_size = canvas_size * 0.25
+            arrow_size = canvas_size * 0.4  # Más grande
             
             # Crear forma de flecha
             arrow = QPainterPath()
@@ -221,22 +204,17 @@ class NodoItem(QGraphicsObject):
             arrow.lineTo(center.x() + arrow_size * 0.6, center.y())
             arrow.closeSubpath()
             
-            painter.setBrush(Qt.white)
-            painter.setPen(QPen(Qt.white, border_width))
+            painter.setBrush(QBrush(color))
+            painter.setPen(QPen(Qt.black, 2))
             painter.drawPath(arrow)
             
         elif tipo == "descargar":
             # Icono de descargar (flecha abajo)
             color = QColor(150, 0, 0)  # Rojo oscuro
             
-            # Dibujar círculo de fondo
-            painter.setBrush(QBrush(color))
-            painter.setPen(QPen(Qt.black, border_width))
-            painter.drawEllipse(rect.adjusted(border_width, border_width, -border_width, -border_width))
-            
-            # Dibujar flecha hacia abajo
+            # Dibujar flecha hacia abajo - SIN círculo de fondo
             center = rect.center()
-            arrow_size = canvas_size * 0.25
+            arrow_size = canvas_size * 0.4  # Más grande
             
             # Crear forma de flecha
             arrow = QPainterPath()
@@ -249,22 +227,17 @@ class NodoItem(QGraphicsObject):
             arrow.lineTo(center.x() + arrow_size * 0.6, center.y())
             arrow.closeSubpath()
             
-            painter.setBrush(Qt.white)
-            painter.setPen(QPen(Qt.white, border_width))
+            painter.setBrush(QBrush(color))
+            painter.setPen(QPen(Qt.black, 2))
             painter.drawPath(arrow)
             
-        else:  # cargador
+        elif tipo == "cargador":
             # Icono de cargador (batería)
             color = QColor(255, 165, 0)  # Naranja
             
-            # Dibujar círculo de fondo
-            painter.setBrush(QBrush(color))
-            painter.setPen(QPen(Qt.black, border_width))
-            painter.drawEllipse(rect.adjusted(border_width, border_width, -border_width, -border_width))
-            
-            # Dibujar símbolo de batería/rayo
+            # Dibujar símbolo de batería/rayo - SIN círculo de fondo
             center = rect.center()
-            bolt_size = canvas_size * 0.3
+            bolt_size = canvas_size * 0.45  # Más grande
             
             # Crear forma de rayo
             bolt = QPainterPath()
@@ -276,15 +249,39 @@ class NodoItem(QGraphicsObject):
             bolt.lineTo(center.x() - bolt_size * 0.1, center.y() + bolt_size * 0.1)
             bolt.closeSubpath()
             
-            painter.setBrush(Qt.white)
-            painter.setPen(QPen(Qt.white, border_width))
+            painter.setBrush(QBrush(color))
+            painter.setPen(QPen(Qt.black, 2))
             painter.drawPath(bolt)
+        
+        elif tipo == "cargadorIO":
+            # Icono para objetivo = 3 (I/O)
+            color = QColor(128, 0, 128)  # Violeta oscuro
+            
+            # Dibujar símbolo I/O - SIN círculo de fondo
+            center = rect.center()
+            io_size = canvas_size * 0.4  # Más grande
+            
+            # Crear forma de I/O
+            io_path = QPainterPath()
+            
+            # Letra "I" (más ancha)
+            io_path.addRect(center.x() - io_size * 0.8, center.y() - io_size * 0.3,
+                           io_size * 0.25, io_size * 0.6)
+            
+            # Letra "O" (círculo más grande)
+            io_path.addEllipse(center.x() + io_size * 0.15, center.y() - io_size * 0.3,
+                              io_size * 0.7, io_size * 0.6)
+            
+            painter.setBrush(QBrush(color))
+            painter.setPen(QPen(Qt.black, 2))
+            painter.drawPath(io_path)
         
         painter.end()
         
         # Escalar al tamaño final con alta calidad
+        target_size = int(self.size * 1.8)  # Iconos más grandes
         return pixmap.scaled(
-            self.size, self.size,
+            target_size, target_size,
             Qt.KeepAspectRatio,
             Qt.SmoothTransformation
         )
@@ -315,10 +312,10 @@ class NodoItem(QGraphicsObject):
             self.con_horquilla = False
             return
             
-        # Caso 4: objetivo = 3 (mantener comportamiento actual)
+        # Caso 4: objetivo = 3 (ahora con icono cargadorIO)
         if self.objetivo == 3:
-            self.mostrar_icono = False
-            self.color_io = QColor("darkViolet")
+            self.mostrar_icono = True
+            self.icono_actual = self._cargador_io_pixmap
             self.texto = "I/O"
             self.con_horquilla = False
             return
@@ -330,7 +327,11 @@ class NodoItem(QGraphicsObject):
         self.con_horquilla = True
 
     def boundingRect(self):
-        return QRectF(0, 0, self.size, self.size)
+        # Aumentar el bounding rect para hacer los nodos más fáciles de seleccionar
+        extra_margin = 10  # Margen adicional para facilitar la selección
+        return QRectF(-extra_margin, -extra_margin, 
+                     self.size + extra_margin * 2, 
+                     self.size + extra_margin * 2)
 
     def paint(self, painter: QPainter, option, widget=None):
         painter.save()
@@ -343,19 +344,23 @@ class NodoItem(QGraphicsObject):
             QPainter.HighQualityAntialiasing
         )
         
+        # Calcular margen para centrar
+        margin = 10
+        
         painter.translate(self.size / 2, self.size / 2)
         angle = int(self.nodo.get("A", 0))  # Leemos el angulo
         painter.rotate(360 - angle)
         painter.translate(-self.size / 2, -self.size / 2)
 
         if self.mostrar_icono and self.icono_actual and not self.icono_actual.isNull():
-            # Calcular posición para centrar el icono con coordenadas enteras
+            # Calcular tamaño y posición del icono (más grande y centrado)
+            icon_size = int(self.size * 1.8)  # Icono más grande
             icon_width = self.icono_actual.width()
             icon_height = self.icono_actual.height()
             
-            # Asegurar que las coordenadas sean enteras para evitar subpixelado
-            x = round((self.size - icon_width) / 2)
-            y = round((self.size - icon_height) / 2)
+            # Calcular posición para centrar el icono
+            x = (self.size - icon_width) / 2
+            y = (self.size - icon_height) / 2
             
             # Asegurar que esté dentro de los límites
             x = max(0, x)
@@ -364,79 +369,57 @@ class NodoItem(QGraphicsObject):
             # Crear rectángulo con coordenadas enteras
             icon_rect = QRectF(x, y, icon_width, icon_height)
             
-            # Dibujar el icono con alta calidad
+            # Dibujar el icono con alta calidad - SIN CONTORNO CIRCULAR
             painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
             painter.drawPixmap(icon_rect, self.icono_actual, 
                              QRectF(0, 0, self.icono_actual.width(), self.icono_actual.height()))
-            
-            # Borde fino y oscuro para mejor contraste
-            painter.setBrush(Qt.NoBrush)
-            painter.setPen(QPen(QColor(50, 50, 50), 1))  # Gris oscuro, 1px
-            painter.drawEllipse(0, 0, self.size, self.size)
         else:
-            # Comportamiento original para nodos sin iconos
-            if self.objetivo == 3:
-                # Nodo I/O (objetivo = 3)
-                painter.setBrush(QBrush(self.color_io))
-                painter.setPen(QPen(self.border_color, 2))
-                painter.drawEllipse(self.boundingRect())
-                
-                # Configurar fuente para el texto
-                font = QFont()
-                font.setPointSize(9)
-                font.setBold(True)
-                painter.setFont(font)
-                
-                # Dibujar el texto en el centro
-                painter.setPen(QPen(Qt.black, 1))
-                text_rect = self.boundingRect()
-                painter.drawText(text_rect, Qt.AlignCenter, self.texto)
-                
-            else:
-                # Nodo por defecto (objetivo = 0)
-                painter.setBrush(QBrush(self.color_default))
-                painter.setPen(QPen(self.border_color, 2))
-                painter.drawEllipse(self.boundingRect())
+            # Comportamiento original para nodos sin iconos (objetivo = 0)
+            painter.setBrush(QBrush(self.color_default))
+            painter.setPen(QPen(self.border_color, 2))
+            painter.drawEllipse(self.boundingRect().adjusted(margin, margin, -margin, -margin))
 
-                # Si el nodo tiene horquilla (objetivo=0 o sin objetivo)
-                if self.con_horquilla:
-                    center_y = self.size / 2
+            # Si el nodo tiene horquilla (objetivo=0 o sin objetivo)
+            if self.con_horquilla:
+                center_y = self.size / 2
 
-                    # Parámetros de las horquillas ORIGINALES (no aumentadas)
-                    fork_length = 15   # longitud de cada horquilla
-                    fork_gap = 6       # separación entre las dos horquillas
-                    offset_from_node = 1  # separación desde el borde izquierdo del nodo
+                # Parámetros de las horquillas ORIGINALES
+                fork_length = 15   # longitud de cada horquilla
+                fork_gap = 6       # separación entre las dos horquillas
+                offset_from_node = 13.5  # separación desde el borde izquierdo del nodo
 
-                    # Coordenadas: dibujamos a la izquierda del nodo
-                    x_start = -offset_from_node
-                    x_end = x_start - fork_length
+                # Coordenadas: dibujamos a la izquierda del nodo
+                x_start = margin - offset_from_node
+                x_end = x_start - fork_length
 
-                    # Posiciones verticales de las dos líneas
-                    y_top = center_y - fork_gap / 2
-                    y_bottom = center_y + fork_gap / 2
+                # Posiciones verticales de las dos líneas
+                y_top = center_y - fork_gap / 2
+                y_bottom = center_y + fork_gap / 2
 
-                    # Dibujar las dos horquillas
-                    pen = QPen(Qt.black, 2, Qt.SolidLine, Qt.RoundCap)
-                    painter.setPen(pen)
-                    painter.drawLine(QPointF(x_start, y_top), QPointF(x_end, y_top))
-                    painter.drawLine(QPointF(x_start, y_bottom), QPointF(x_end, y_bottom))
+                # Dibujar las dos horquillas
+                pen = QPen(Qt.black, 2, Qt.SolidLine, Qt.RoundCap)
+                painter.setPen(pen)
+                painter.drawLine(QPointF(x_start, y_top), QPointF(x_end, y_top))
+                painter.drawLine(QPointF(x_start, y_bottom), QPointF(x_end, y_bottom))
 
-                # Configurar fuente para el texto
-                font = QFont()
-                font.setPointSize(9)
-                font.setBold(True)
-                painter.setFont(font)
+            # Configurar fuente para el texto
+            font = QFont()
+            font.setPointSize(9)
+            font.setBold(True)
+            painter.setFont(font)
 
-                # Dibujar el texto en el centro
-                painter.setPen(QPen(Qt.white, 1))
-                text_rect = self.boundingRect()
-                painter.drawText(text_rect, Qt.AlignCenter, self.texto)
+            # Dibujar el texto en el centro
+            text_rect = self.boundingRect().adjusted(margin, margin, -margin, -margin)
+            painter.setPen(QPen(Qt.white, 1))
+            painter.drawText(text_rect, Qt.AlignCenter, self.texto)
 
         # Si está seleccionado, dibujar un borde adicional
         if self.isSelected():
             painter.setBrush(Qt.NoBrush)
             painter.setPen(QPen(self.color_selected, 3))
-            painter.drawEllipse(self.boundingRect().adjusted(2, 2, -2, -2))
+            # Dibujar borde alrededor del área del nodo
+            painter.drawEllipse(self.boundingRect().adjusted(margin + 2, margin + 2, 
+                                                           -margin - 2, -margin - 2))
 
         painter.restore()
 
@@ -612,10 +595,18 @@ class NodoItem(QGraphicsObject):
             print(f"Error en mouseReleaseEvent: {err}")
         finally:
             self._dragging = False
-            # Notificar al editor que terminó el arrastre
+            # CRÍTICO: Notificar al editor que terminó el arrastre
             if self.editor:
-                print("Llamando a nodo_arrastre_terminado")
-                self.editor.nodo_arrastre_terminado()
+                print("Llamando a nodo_arrastre_terminado desde mouseReleaseEvent")
+                # Forzar la actualización del cursor
+                self.editor._arrastrando_nodo = False
+                # Primero actualizar estado hover
+                pos = event.scenePos()
+                items = self.scene().items(pos)
+                hay_nodo = any(isinstance(it, NodoItem) for it in items)
+                self.editor._cursor_sobre_nodo = hay_nodo
+                # Luego actualizar cursor
+                self.editor._actualizar_cursor()
             super().mouseReleaseEvent(event)
     
     def hoverEnterEvent(self, event):
@@ -627,9 +618,28 @@ class NodoItem(QGraphicsObject):
         super().hoverEnterEvent(event)
 
     def hoverLeaveEvent(self, event):
-        """Cuando el ratón sale del nodo"""
+        """Cuando el ratón sale del nodo - MEJORADO"""
         print(f"HoverLeave en nodo {self.nodo.get('id')}")
-        if self.editor:
-            self.editor.nodo_hover_leaved(self)
-        self.hover_leaved.emit(self)
+        
+        # Solo procesar si no estamos arrastrando
+        if not self._dragging:
+            if self.editor:
+                # Verificar si el cursor realmente salió de TODOS los nodos
+                pos = event.scenePos()
+                items = self.scene().items(pos)
+                
+                # Contar nodos bajo el cursor
+                nodos_bajo_cursor = [it for it in items if isinstance(it, NodoItem)]
+                
+                if len(nodos_bajo_cursor) == 0:
+                    # Realmente salió de todos los nodos
+                    self.editor._cursor_sobre_nodo = False
+                    print(f"Cursor realmente salió de nodo {self.nodo.get('id')}")
+                else:
+                    # Todavía está sobre otro nodo (superposición)
+                    print(f"Cursor sigue sobre {len(nodos_bajo_cursor)} nodos")
+                    self.editor._cursor_sobre_nodo = True
+            
+            self.hover_leaved.emit(self)
+        
         super().hoverLeaveEvent(event)

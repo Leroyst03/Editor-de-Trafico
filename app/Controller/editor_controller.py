@@ -190,15 +190,19 @@ class EditorController(QObject):
                     return
                     
             elif self.modo_actual == "mover":
-                # MODO MOVER
+                # MODO MOVER - CORREGIDO
                 if self._arrastrando_nodo:
                     # Mano cerrada cuando se está arrastrando un nodo
                     cursor = Qt.ClosedHandCursor
                     print("MODO MOVER: ClosedHandCursor (arrastrando nodo)")
-                else:
-                    # PointingHandCursor cuando no se está arrastrando
+                elif self._cursor_sobre_nodo:
+                    # PointingHandCursor cuando está sobre un nodo pero NO arrastrando
                     cursor = Qt.PointingHandCursor
-                    print("MODO MOVER: PointingHandCursor")
+                    print("MODO MOVER: PointingHandCursor (sobre nodo, no arrastrando)")
+                else:
+                    # Flecha cuando no está sobre un nodo
+                    cursor = Qt.ArrowCursor
+                    print("MODO MOVER: ArrowCursor (no sobre nodo)")
                     
             elif self.modo_actual == "colocar":
                 # MODO COLOCAR VÉRTICE
@@ -220,6 +224,7 @@ class EditorController(QObject):
             
         except Exception as e:
             print(f"Error al actualizar cursor: {e}")
+
 
     def nodo_hover_entered(self, nodo_item):
         """Cuando el ratón entra en un nodo"""
@@ -1520,6 +1525,7 @@ class EditorController(QObject):
                     break
         finally:
             self._changing_selection = False
+            self._actualizar_cursor()
 
     def actualizar_lista_nodo(self, nodo):
         """Actualizar la lista lateral del panel de propiedades con las coordenadas nuevas (en metros)"""
@@ -2954,22 +2960,24 @@ class EditorController(QObject):
         
         # Detectar movimiento del ratón para actualizar cursor dinámicamente
         if event.type() == QEvent.MouseMove:
-            # Solo actualizar si estamos en modo por defecto
-            if self.modo_actual is None:
-                # Verificar si hay nodos en la posición actual
-                pos = self.view.marco_trabajo.mapToScene(event.pos())
-                items = self.scene.items(pos)
-                hay_nodo = any(isinstance(it, NodoItem) for it in items)
-                
-                # Si el estado de hover cambia, actualizar
-                if hay_nodo and not self._cursor_sobre_nodo:
-                    # El ratón acaba de entrar en un nodo
-                    self._cursor_sobre_nodo = True
-                    self._actualizar_cursor()
-                elif not hay_nodo and self._cursor_sobre_nodo:
-                    # El ratón acaba de salir de un nodo
-                    self._cursor_sobre_nodo = False
-                    self._actualizar_cursor()
+            # Obtener posición actual del ratón
+            pos = self.view.marco_trabajo.mapToScene(event.pos())
+            items = self.scene.items(pos)
+            
+            # Verificar si hay nodos en la posición actual
+            hay_nodo = any(isinstance(it, NodoItem) for it in items)
+            
+            # Actualizar estado de hover
+            if hay_nodo and not self._cursor_sobre_nodo:
+                # El ratón acaba de entrar en un nodo
+                self._cursor_sobre_nodo = True
+                print(f"MouseMove: Entrando en nodo, sobre_nodo=True")
+                self._actualizar_cursor()
+            elif not hay_nodo and self._cursor_sobre_nodo:
+                # El ratón acaba de salir de un nodo
+                self._cursor_sobre_nodo = False
+                print(f"MouseMove: Saliendo de nodo, sobre_nodo=False")
+                self._actualizar_cursor()
         
         # Detectar click izquierdo en el viewport
         if event.type() == QEvent.MouseButtonPress:
@@ -2980,20 +2988,21 @@ class EditorController(QObject):
             if self.modo_actual in ["ruta", "colocar"]:
                 return False
             
-            # SEGUNDO: Comportamiento normal
+            # Verificar si hay nodos en la posición del clic
             items = self.scene.items(pos)
-            if not any(isinstance(it, NodoItem) for it in items):
+            hay_nodo = any(isinstance(it, NodoItem) for it in items)
+            
+            if not hay_nodo:
                 # Click fuera de nodo
-                print("CLICK FUERA DE NODO")
+                print("CLICK FUERA DE NODO - Forzar estado normal")
                 
-                # Resetear estado de hover
-                if self._cursor_sobre_nodo:
-                    self._cursor_sobre_nodo = False
-                    self._actualizar_cursor()
-                
-                # Si estábamos arrastrando, terminar el arrastre
+                # Resetear estados de cursor
                 if self._arrastrando_nodo:
-                    self.nodo_arrastre_terminado()
+                    print("Forzando fin de arrastre")
+                    self._arrastrando_nodo = False
+                
+                self._cursor_sobre_nodo = False
+                self._actualizar_cursor()
                 
                 # Resto del código existente...
                 try:
@@ -3030,6 +3039,17 @@ class EditorController(QObject):
                 for item in self.scene.items():
                     if isinstance(item, NodoItem):
                         item.set_normal_color()
+        
+        # NUEVO: Detectar liberación del botón del ratón
+        if event.type() == QEvent.MouseButtonRelease:
+            print("MouseButtonRelease detectado - Forzar actualización de cursor")
+            # Resetear estado de arrastre si aún está activo
+            if self._arrastrando_nodo:
+                self._arrastrando_nodo = False
+                print("Resetear arrastre desde eventFilter")
+            
+            # Forzar actualización del cursor
+            self._actualizar_cursor()
         
         return False
 
@@ -3785,79 +3805,6 @@ class EditorController(QObject):
                     for nodo_solapado in nodos_solapados:
                         nodo_solapado.setZValue(999)
 
-    def seleccionar_nodo_desde_mapa(self):
-        """Versión modificada para manejar nodos solapados"""
-        if self._changing_selection:
-            return
-            
-        seleccionados = self.scene.selectedItems()
-        if not seleccionados:
-            return
-            
-        nodo_item = seleccionados[0]
-        nodo = nodo_item.nodo
-
-        # --- DETECCIÓN DE NODOS SUPERPUESTOS ---
-        pos = nodo_item.scenePos()
-        # Usar un rectángulo pequeño alrededor del punto para detectar nodos cercanos
-        search_rect = nodo_item.boundingRect().translated(pos)
-        search_rect.adjust(-5, -5, 5, 5)  # Expandir un poco el área de búsqueda
-        
-        items_en_pos = self.scene.items(search_rect)
-        nodos_en_pos = []
-        
-        for item in items_en_pos:
-            if isinstance(item, NodoItem):
-                # Verificar si está realmente superpuesto (misma posición aproximada)
-                item_pos = item.scenePos()
-                if (abs(item_pos.x() - pos.x()) < 10 and 
-                    abs(item_pos.y() - pos.y()) < 10):
-                    nodos_en_pos.append(item)
-        
-        if len(nodos_en_pos) > 1:
-            # Hay nodos superpuestos, ajustar z-values primero
-            for nodo_en_pos in nodos_en_pos:
-                if nodo_en_pos == nodo_item:
-                    nodo_en_pos.setZValue(1000)  # El seleccionado encima
-                else:
-                    nodo_en_pos.setZValue(999)   # Los otros justo debajo
-            
-            # Mostrar menú
-            self.mostrar_menu_nodos_superpuestos(nodos_en_pos, pos)
-            return  # El menú manejará la selección
-
-        # --- CONTINUAR CON SELECCIÓN NORMAL ---
-        self._changing_selection = True
-        try:
-            # Deseleccionar rutas primero
-            if hasattr(self.view, "rutasList"):
-                self.view.rutasList.clearSelection()
-            
-            # Primero restaurar todos los nodos a color normal
-            self.restaurar_colores_nodos()
-            
-            # Asegurar que el nodo seleccionado esté encima
-            nodo_item.setZValue(1000)
-            
-            # Deseleccionar todos los nodos primero
-            for item in self.scene.selectedItems():
-                if item != nodo_item:
-                    item.setSelected(False)
-            
-            # Resaltar el nodo seleccionado
-            nodo_item.set_selected_color()
-            
-            # Sincronizar con la lista lateral
-            nodo_id = nodo.get('id')
-            for i in range(self.view.nodosList.count()):
-                item = self.view.nodosList.item(i)
-                widget = self.view.nodosList.itemWidget(item)
-                if widget and hasattr(widget, 'nodo_id') and widget.nodo_id == nodo_id:
-                    self.view.nodosList.setCurrentItem(item)
-                    self.mostrar_propiedades_nodo(nodo)
-                    break
-        finally:
-            self._changing_selection = False
 
     def seleccionar_nodo_desde_lista(self):
         """Versión modificada para manejar nodos solapados"""
@@ -4231,3 +4178,8 @@ class EditorController(QObject):
         
         # Si después de reconstruir tenemos menos de 2 nodos, retornar vacío
         return ruta_reconstruida if len(ruta_reconstruida) >= 2 else []
+    
+    def forzar_actualizacion_cursor(self):
+        """Fuerza la actualización del cursor, útil para debug"""
+        print("=== FORZANDO ACTUALIZACIÓN DE CURSOR ===")
+        self._actualizar_cursor()
