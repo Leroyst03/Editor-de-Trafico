@@ -260,6 +260,14 @@ class EditorController(QObject):
         if self.modo_actual:
             self._resetear_modo_actual()
         
+        # Asegurar que todos los nodos tienen el campo es_cargador
+        for nodo in self.proyecto.nodos:
+            if isinstance(nodo, dict):
+                if "es_cargador" not in nodo:
+                    nodo["es_cargador"] = 0  # Valor por defecto
+            elif not hasattr(nodo, "es_cargador"):
+                setattr(nodo, "es_cargador", 0)
+        
         print("✓ Referencias del proyecto actualizadas en todos los controladores")
 
     def _resetear_modo_actual(self):
@@ -1032,14 +1040,17 @@ class EditorController(QObject):
             nodo = self.proyecto.agregar_nodo(x, y)
             print(f"DEBUG crear_nodo: Nodo creado con ID {nodo.get('id')}")
 
-            # Asegurar que el nodo tenga el campo "objetivo"
+            # Asegurar que el nodo tenga todos los campos necesarios
             if isinstance(nodo, dict):
                 if "objetivo" not in nodo:
                     nodo["objetivo"] = 0
+                if "es_cargador" not in nodo:
+                    nodo["es_cargador"] = 0
             elif hasattr(nodo, "objetivo"):
-                pass
+                pass  # Ya tiene el atributo
             else:
                 setattr(nodo, "objetivo", 0)
+                setattr(nodo, "es_cargador", 0)
 
             # Crear NodoItem con referencia al editor usando helper centralizado
             try:
@@ -1069,7 +1080,22 @@ class EditorController(QObject):
             # Mostrar en metros
             x_m = self.pixeles_a_metros(x)
             y_m = self.pixeles_a_metros(y)
-            print(f"✓ Nodo ID {nodo.get('id')} creado con botón de visibilidad en ({x_m:.2f}, {y_m:.2f}) metros")
+            
+            # Mostrar tipo de nodo
+            objetivo = nodo.get('objetivo', 0)
+            es_cargador = nodo.get('es_cargador', 0)
+            if es_cargador != 0:
+                tipo = "CARGADOR"
+            elif objetivo == 1:
+                tipo = "CARGAR"
+            elif objetivo == 2:
+                tipo = "DESCARGAR"
+            elif objetivo == 3:
+                tipo = "I/O"
+            else:
+                tipo = "Normal"
+                
+            print(f"✓ Nodo ID {nodo.get('id')} ({tipo}) creado con botón de visibilidad en ({x_m:.2f}, {y_m:.2f}) metros")
             print("Nodo creado:", getattr(nodo, "to_dict", lambda: nodo)())
         except Exception as e:
             print(f"ERROR en crear_nodo: {e}")
@@ -1972,6 +1998,14 @@ class EditorController(QObject):
             # Usar el método del proyecto para actualizar (esto emitirá la señal)
             self.proyecto.actualizar_nodo({clave: valor, "id": nodo.get('id')})
             
+            # Si la clave es 'objetivo' o 'es_cargador', actualizar visualización del nodo
+            if clave in ["objetivo", "es_cargador"]:
+                for item in self.scene.items():
+                    if isinstance(item, NodoItem):
+                        if item.nodo.get('id') == nodo.get('id'):
+                            item.actualizar_objetivo()
+                            break
+                
         except Exception as err:
             print("Error actualizando nodo en el modelo:", err)
             return

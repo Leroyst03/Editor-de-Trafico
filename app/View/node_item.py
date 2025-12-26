@@ -1,7 +1,8 @@
 from PyQt5.QtWidgets import QGraphicsObject, QMessageBox, QGraphicsItem
 from PyQt5.QtCore import QRectF, Qt, pyqtSignal, QPointF
-from PyQt5.QtGui import QBrush, QPainter, QPen, QColor, QFont, QCursor
+from PyQt5.QtGui import QBrush, QPainter,QPainterPath, QPen, QColor, QFont, QCursor, QPixmap, QImage
 from Model.Nodo import Nodo
+import os
 
 class NodoItem(QGraphicsObject):
     moved = pyqtSignal(object)  # emite (id, x, y) o el objeto nodo según preferencia
@@ -12,7 +13,7 @@ class NodoItem(QGraphicsObject):
     hover_entered = pyqtSignal(object)  # Emite self cuando el ratón entra
     hover_leaved = pyqtSignal(object)   # Emite self cuando el ratón sale
 
-    def __init__(self, nodo: Nodo, size=20, editor=None):
+    def __init__(self, nodo: Nodo, size=35, editor=None):  # Tamaño moderado para mejor visibilidad
         super().__init__()
         self.nodo = nodo
         self.size = size
@@ -47,39 +48,286 @@ class NodoItem(QGraphicsObject):
         self._dragging = False
         self._posicion_inicial = None  # Para guardar posición al inicio del arrastre
 
-        # Colores configurables según objetivo
-        self.color_in = QColor("darkGreen")        # Verde para IN
-        self.color_out = QColor("darkRed")       # Rojo para OUT
-        self.color_io = QColor("darkViolet")      # Amarillo para I/O
-        self.color_default = QColor(0, 120, 215) # Azul por defecto si no hay objetivo
+        # Cargar imágenes de iconos
+        self._cargar_pixmap = None
+        self._descargar_pixmap = None
+        self._cargador_pixmap = None
+        self._cargar_icono_optimizado()
         
-        # Colores para estados especiales
+        # Obtener parámetros del nodo
+        self.objetivo = self.nodo.get("objetivo", 0) if hasattr(self.nodo, "get") else getattr(self.nodo, "objetivo", 0)
+        self.es_cargador = self.nodo.get("es_cargador", 0) if hasattr(self.nodo, "get") else getattr(self.nodo, "es_cargador", 0)
+        
+        # Definir qué mostrar según las reglas
+        self._determinar_visualizacion()
+        
+        # Colores para estados especiales (ahora solo para nodos sin iconos)
         self.color_selected = QColor(255, 255, 255)   # Blanco para selección (borde)
         self.color_route_selected = QColor(255, 165, 0)  # Naranja para nodos en ruta seleccionada
         
-        # Obtener objetivo del nodo
-        self.objetivo = self.nodo.get("objetivo", 0) if hasattr(self.nodo, "get") else getattr(self.nodo, "objetivo", 0)
-        
-        # Definir color de relleno según objetivo
-        if self.objetivo == 1:
-            self.fill_color = self.color_in
-            self.texto = "IN"
-            self.con_horquilla = False  # Sin horquilla para IN
-        elif self.objetivo == 2:
-            self.fill_color = self.color_out
-            self.texto = "OUT"
-            self.con_horquilla = False  # Sin horquilla para OUT
-        elif self.objetivo == 3:
-            self.fill_color = self.color_io
-            self.texto = "I/O"
-            self.con_horquilla = False  # Sin horquilla para I/O
-        else:
-            self.fill_color = self.color_default
-            self.texto = str(self.nodo.get('id', ''))
-            self.con_horquilla = True  # Con horquilla para nodos comunes
-        
         # Color de borde normal
         self.border_color = Qt.black
+
+    def _cargar_png_con_calidad(self, path, target_size):
+        """Carga PNG con máxima calidad usando técnica de escalado optimizado"""
+        if not os.path.exists(path):
+            return None
+            
+        # Cargar como QImage para mejor control
+        image = QImage(path)
+        
+        # Convertir a formato ARGB32 si no lo está (para transparencia)
+        if image.format() != QImage.Format_ARGB32:
+            image = image.convertToFormat(QImage.Format_ARGB32)
+        
+        # Si la imagen es muy pequeña o muy grande, escalar en dos pasos
+        original_width = image.width()
+        original_height = image.height()
+        
+        # Determinar el mejor enfoque de escalado
+        if original_width < target_size * 0.5 or original_width > target_size * 2:
+            # Escalar a un tamaño intermedio (múltiplo de 2)
+            intermediate_size = target_size * 2
+            scaled_image = image.scaled(
+                intermediate_size, intermediate_size,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            # Luego escalar al tamaño final
+            scaled_image = scaled_image.scaled(
+                target_size, target_size,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+        else:
+            # Escalar directamente al tamaño deseado
+            scaled_image = image.scaled(
+                target_size, target_size,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+        
+        return QPixmap.fromImage(scaled_image)
+
+    def _cargar_icono_optimizado(self):
+        """Carga y optimiza iconos PNG para máxima nitidez"""
+        try:
+            # Obtener el directorio base del proyecto
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            icon_dir = os.path.join(base_dir, "Static", "Icons")
+            
+            # Lista de tamaños preferidos (de mayor a menor calidad)
+            preferred_sizes = [
+                self.size * 4,  # 140x140 para 35px final (alta densidad)
+                self.size * 2,  # 70x70
+                self.size,      # 35x35
+                128,            # Tamaño estándar
+                64,
+                32
+            ]
+            
+            # Función para encontrar el mejor icono disponible
+            def encontrar_mejor_icono(nombre):
+                # 1. Buscar en carpetas de tamaño específico
+                for size in preferred_sizes:
+                    # Buscar en carpeta específica (ej: "70x70/cargar.png")
+                    specific_dir = os.path.join(icon_dir, f"{size}x{size}")
+                    specific_path = os.path.join(specific_dir, f"{nombre}.png")
+                    if os.path.exists(specific_path):
+                        print(f"✓ Encontrado {nombre} en tamaño específico {size}x{size}")
+                        return self._cargar_png_con_calidad(specific_path, self.size)
+                
+                # 2. Buscar en la raíz con tamaño específico en nombre (ej: "cargar_70x70.png")
+                for size in preferred_sizes:
+                    sized_path = os.path.join(icon_dir, f"{nombre}_{size}x{size}.png")
+                    if os.path.exists(sized_path):
+                        print(f"✓ Encontrado {nombre}_{size}x{size}.png")
+                        return self._cargar_png_con_calidad(sized_path, self.size)
+                
+                # 3. Buscar en la raíz sin tamaño
+                root_path = os.path.join(icon_dir, f"{nombre}.png")
+                if os.path.exists(root_path):
+                    print(f"✓ Encontrado {nombre}.png en raíz")
+                    return self._cargar_png_con_calidad(root_path, self.size)
+                
+                return None
+            
+            # Cargar cada icono con la mejor calidad disponible
+            self._cargar_pixmap = encontrar_mejor_icono("cargar")
+            self._descargar_pixmap = encontrar_mejor_icono("descargar")
+            self._cargador_pixmap = encontrar_mejor_icono("bateria")
+            
+            # Si algún icono no se encontró, crear alternativo
+            if self._cargar_pixmap is None or self._cargar_pixmap.isNull():
+                self._cargar_pixmap = self._crear_icono_vectorial("cargar")
+                print("⚠ Creado icono alternativo para 'cargar'")
+            
+            if self._descargar_pixmap is None or self._descargar_pixmap.isNull():
+                self._descargar_pixmap = self._crear_icono_vectorial("descargar")
+                print("⚠ Creado icono alternativo para 'descargar'")
+            
+            if self._cargador_pixmap is None or self._cargador_pixmap.isNull():
+                self._cargador_pixmap = self._crear_icono_vectorial("cargador")
+                print("⚠ Creado icono alternativo para 'bateria'")
+                
+        except Exception as e:
+            print(f"Error cargando iconos optimizados: {e}")
+            # Crear iconos alternativos
+            self._cargar_pixmap = self._crear_icono_vectorial("cargar")
+            self._descargar_pixmap = self._crear_icono_vectorial("descargar")
+            self._cargador_pixmap = self._crear_icono_vectorial("cargador")
+
+    def _crear_icono_vectorial(self, tipo):
+        """Crea iconos vectoriales personalizados con alta calidad"""
+        # Crear a mayor resolución para luego escalar
+        canvas_size = self.size * 4  # Crear a 4x la resolución
+        pixmap = QPixmap(canvas_size, canvas_size)
+        pixmap.fill(Qt.transparent)
+        
+        painter = QPainter(pixmap)
+        painter.setRenderHints(
+            QPainter.Antialiasing | 
+            QPainter.TextAntialiasing | 
+            QPainter.SmoothPixmapTransform |
+            QPainter.HighQualityAntialiasing
+        )
+        
+        rect = QRectF(0, 0, canvas_size, canvas_size)
+        
+        # Configuración común
+        border_width = 4  # Ancho del borde a alta resolución
+        
+        if tipo == "cargar":
+            # Icono de cargar (flecha arriba)
+            color = QColor(0, 150, 0)  # Verde oscuro
+            
+            # Dibujar círculo de fondo
+            painter.setBrush(QBrush(color))
+            painter.setPen(QPen(Qt.black, border_width))
+            painter.drawEllipse(rect.adjusted(border_width, border_width, -border_width, -border_width))
+            
+            # Dibujar flecha hacia arriba
+            center = rect.center()
+            arrow_size = canvas_size * 0.25
+            
+            # Crear forma de flecha
+            arrow = QPainterPath()
+            arrow.moveTo(center.x(), center.y() - arrow_size)
+            arrow.lineTo(center.x() - arrow_size * 0.6, center.y())
+            arrow.lineTo(center.x() - arrow_size * 0.3, center.y())
+            arrow.lineTo(center.x() - arrow_size * 0.3, center.y() + arrow_size * 0.5)
+            arrow.lineTo(center.x() + arrow_size * 0.3, center.y() + arrow_size * 0.5)
+            arrow.lineTo(center.x() + arrow_size * 0.3, center.y())
+            arrow.lineTo(center.x() + arrow_size * 0.6, center.y())
+            arrow.closeSubpath()
+            
+            painter.setBrush(Qt.white)
+            painter.setPen(QPen(Qt.white, border_width))
+            painter.drawPath(arrow)
+            
+        elif tipo == "descargar":
+            # Icono de descargar (flecha abajo)
+            color = QColor(150, 0, 0)  # Rojo oscuro
+            
+            # Dibujar círculo de fondo
+            painter.setBrush(QBrush(color))
+            painter.setPen(QPen(Qt.black, border_width))
+            painter.drawEllipse(rect.adjusted(border_width, border_width, -border_width, -border_width))
+            
+            # Dibujar flecha hacia abajo
+            center = rect.center()
+            arrow_size = canvas_size * 0.25
+            
+            # Crear forma de flecha
+            arrow = QPainterPath()
+            arrow.moveTo(center.x(), center.y() + arrow_size)
+            arrow.lineTo(center.x() - arrow_size * 0.6, center.y())
+            arrow.lineTo(center.x() - arrow_size * 0.3, center.y())
+            arrow.lineTo(center.x() - arrow_size * 0.3, center.y() - arrow_size * 0.5)
+            arrow.lineTo(center.x() + arrow_size * 0.3, center.y() - arrow_size * 0.5)
+            arrow.lineTo(center.x() + arrow_size * 0.3, center.y())
+            arrow.lineTo(center.x() + arrow_size * 0.6, center.y())
+            arrow.closeSubpath()
+            
+            painter.setBrush(Qt.white)
+            painter.setPen(QPen(Qt.white, border_width))
+            painter.drawPath(arrow)
+            
+        else:  # cargador
+            # Icono de cargador (batería)
+            color = QColor(255, 165, 0)  # Naranja
+            
+            # Dibujar círculo de fondo
+            painter.setBrush(QBrush(color))
+            painter.setPen(QPen(Qt.black, border_width))
+            painter.drawEllipse(rect.adjusted(border_width, border_width, -border_width, -border_width))
+            
+            # Dibujar símbolo de batería/rayo
+            center = rect.center()
+            bolt_size = canvas_size * 0.3
+            
+            # Crear forma de rayo
+            bolt = QPainterPath()
+            bolt.moveTo(center.x() + bolt_size * 0.3, center.y() - bolt_size * 0.4)
+            bolt.lineTo(center.x() - bolt_size * 0.3, center.y() - bolt_size * 0.1)
+            bolt.lineTo(center.x() + bolt_size * 0.1, center.y() - bolt_size * 0.1)
+            bolt.lineTo(center.x() - bolt_size * 0.3, center.y() + bolt_size * 0.4)
+            bolt.lineTo(center.x() + bolt_size * 0.3, center.y() + bolt_size * 0.1)
+            bolt.lineTo(center.x() - bolt_size * 0.1, center.y() + bolt_size * 0.1)
+            bolt.closeSubpath()
+            
+            painter.setBrush(Qt.white)
+            painter.setPen(QPen(Qt.white, border_width))
+            painter.drawPath(bolt)
+        
+        painter.end()
+        
+        # Escalar al tamaño final con alta calidad
+        return pixmap.scaled(
+            self.size, self.size,
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation
+        )
+
+    def _determinar_visualizacion(self):
+        """Determina qué visualización usar según las reglas"""
+        # Prioridad 1: es_cargador != 0
+        if self.es_cargador != 0:
+            self.mostrar_icono = True
+            self.icono_actual = self._cargador_pixmap
+            self.texto = "CARGADOR"
+            self.con_horquilla = False
+            return
+        
+        # Prioridad 2: objetivo = 1 (cargar)
+        if self.objetivo == 1:
+            self.mostrar_icono = True
+            self.icono_actual = self._cargar_pixmap
+            self.texto = "CARGAR"
+            self.con_horquilla = False
+            return
+            
+        # Prioridad 3: objetivo = 2 (descargar)
+        if self.objetivo == 2:
+            self.mostrar_icono = True
+            self.icono_actual = self._descargar_pixmap
+            self.texto = "DESCARGAR"
+            self.con_horquilla = False
+            return
+            
+        # Caso 4: objetivo = 3 (mantener comportamiento actual)
+        if self.objetivo == 3:
+            self.mostrar_icono = False
+            self.color_io = QColor("darkViolet")
+            self.texto = "I/O"
+            self.con_horquilla = False
+            return
+            
+        # Caso por defecto: sin objetivo especial
+        self.mostrar_icono = False
+        self.color_default = QColor(0, 120, 215)
+        self.texto = str(self.nodo.get('id', ''))
+        self.con_horquilla = True
 
     def boundingRect(self):
         return QRectF(0, 0, self.size, self.size)
@@ -87,53 +335,102 @@ class NodoItem(QGraphicsObject):
     def paint(self, painter: QPainter, option, widget=None):
         painter.save()
         
+        # Configuración de renderizado de ALTA CALIDAD
+        painter.setRenderHints(
+            QPainter.Antialiasing | 
+            QPainter.TextAntialiasing | 
+            QPainter.SmoothPixmapTransform |
+            QPainter.HighQualityAntialiasing
+        )
+        
         painter.translate(self.size / 2, self.size / 2)
         angle = int(self.nodo.get("A", 0))  # Leemos el angulo
         painter.rotate(360 - angle)
         painter.translate(-self.size / 2, -self.size / 2)
 
-        # Dibujar círculo con color según objetivo
-        painter.setBrush(QBrush(self.fill_color))
-        painter.setPen(QPen(self.border_color, 2))
-        painter.drawEllipse(self.boundingRect())
-
-        # Si el nodo tiene horquilla (objetivo=0 o sin objetivo)
-        if self.con_horquilla:
-            center_y = self.size / 2
-
-            # Parámetros de las horquillas
-            fork_length = 15   # longitud de cada horquilla (hacia la izquierda)
-            fork_gap = 6       # separación entre las dos horquillas
-            offset_from_node = 1  # separación desde el borde izquierdo del nodo hasta el inicio de las horquillas
-
-            # Coordenadas: dibujamos a la izquierda del nodo
-            x_start = -offset_from_node
-            x_end = x_start - fork_length
-
-            # Posiciones verticales de las dos líneas
-            y_top = center_y - fork_gap / 2
-            y_bottom = center_y + fork_gap / 2
-
-            # Dibujar las dos horquillas
-            pen = QPen(Qt.black, 2, Qt.SolidLine, Qt.RoundCap)
-            painter.setPen(pen)
-            painter.drawLine(QPointF(x_start, y_top), QPointF(x_end, y_top))
-            painter.drawLine(QPointF(x_start, y_bottom), QPointF(x_end, y_bottom))
-
-        # Configurar fuente para el texto
-        font = QFont()
-        font.setPointSize(8)
-        font.setBold(True)
-        painter.setFont(font)
-
-        # Dibujar el texto en el centro
-        if self.objetivo in [1, 2, 3]:  # Para IN, OUT, I/O usar color negro
-            painter.setPen(QPen(Qt.black, 1))
-        else:  # Para nodos comunes usar color blanco
-            painter.setPen(QPen(Qt.white, 1))
+        if self.mostrar_icono and self.icono_actual and not self.icono_actual.isNull():
+            # Calcular posición para centrar el icono con coordenadas enteras
+            icon_width = self.icono_actual.width()
+            icon_height = self.icono_actual.height()
             
-        text_rect = self.boundingRect()
-        painter.drawText(text_rect, Qt.AlignCenter, self.texto)
+            # Asegurar que las coordenadas sean enteras para evitar subpixelado
+            x = round((self.size - icon_width) / 2)
+            y = round((self.size - icon_height) / 2)
+            
+            # Asegurar que esté dentro de los límites
+            x = max(0, x)
+            y = max(0, y)
+            
+            # Crear rectángulo con coordenadas enteras
+            icon_rect = QRectF(x, y, icon_width, icon_height)
+            
+            # Dibujar el icono con alta calidad
+            painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            painter.drawPixmap(icon_rect, self.icono_actual, 
+                             QRectF(0, 0, self.icono_actual.width(), self.icono_actual.height()))
+            
+            # Borde fino y oscuro para mejor contraste
+            painter.setBrush(Qt.NoBrush)
+            painter.setPen(QPen(QColor(50, 50, 50), 1))  # Gris oscuro, 1px
+            painter.drawEllipse(0, 0, self.size, self.size)
+        else:
+            # Comportamiento original para nodos sin iconos
+            if self.objetivo == 3:
+                # Nodo I/O (objetivo = 3)
+                painter.setBrush(QBrush(self.color_io))
+                painter.setPen(QPen(self.border_color, 2))
+                painter.drawEllipse(self.boundingRect())
+                
+                # Configurar fuente para el texto
+                font = QFont()
+                font.setPointSize(9)
+                font.setBold(True)
+                painter.setFont(font)
+                
+                # Dibujar el texto en el centro
+                painter.setPen(QPen(Qt.black, 1))
+                text_rect = self.boundingRect()
+                painter.drawText(text_rect, Qt.AlignCenter, self.texto)
+                
+            else:
+                # Nodo por defecto (objetivo = 0)
+                painter.setBrush(QBrush(self.color_default))
+                painter.setPen(QPen(self.border_color, 2))
+                painter.drawEllipse(self.boundingRect())
+
+                # Si el nodo tiene horquilla (objetivo=0 o sin objetivo)
+                if self.con_horquilla:
+                    center_y = self.size / 2
+
+                    # Parámetros de las horquillas ORIGINALES (no aumentadas)
+                    fork_length = 15   # longitud de cada horquilla
+                    fork_gap = 6       # separación entre las dos horquillas
+                    offset_from_node = 1  # separación desde el borde izquierdo del nodo
+
+                    # Coordenadas: dibujamos a la izquierda del nodo
+                    x_start = -offset_from_node
+                    x_end = x_start - fork_length
+
+                    # Posiciones verticales de las dos líneas
+                    y_top = center_y - fork_gap / 2
+                    y_bottom = center_y + fork_gap / 2
+
+                    # Dibujar las dos horquillas
+                    pen = QPen(Qt.black, 2, Qt.SolidLine, Qt.RoundCap)
+                    painter.setPen(pen)
+                    painter.drawLine(QPointF(x_start, y_top), QPointF(x_end, y_top))
+                    painter.drawLine(QPointF(x_start, y_bottom), QPointF(x_end, y_bottom))
+
+                # Configurar fuente para el texto
+                font = QFont()
+                font.setPointSize(9)
+                font.setBold(True)
+                painter.setFont(font)
+
+                # Dibujar el texto en el centro
+                painter.setPen(QPen(Qt.white, 1))
+                text_rect = self.boundingRect()
+                painter.drawText(text_rect, Qt.AlignCenter, self.texto)
 
         # Si está seleccionado, dibujar un borde adicional
         if self.isSelected():
@@ -168,27 +465,13 @@ class NodoItem(QGraphicsObject):
             pass
 
     def actualizar_objetivo(self):
-        """Actualiza el color y texto cuando cambia el campo objetivo"""
+        """Actualiza la visualización cuando cambian los parámetros del nodo"""
+        # Actualizar valores del nodo
         self.objetivo = self.nodo.get("objetivo", 0) if hasattr(self.nodo, "get") else getattr(self.nodo, "objetivo", 0)
+        self.es_cargador = self.nodo.get("es_cargador", 0) if hasattr(self.nodo, "get") else getattr(self.nodo, "es_cargador", 0)
         
-        # Definir color de relleno y texto según objetivo
-        if self.objetivo == 1:
-            self.fill_color = self.color_in
-            self.texto = "IN"
-            self.con_horquilla = False  # Sin horquilla para IN
-        elif self.objetivo == 2:
-            self.fill_color = self.color_out
-            self.texto = "OUT"
-            self.con_horquilla = False  # Sin horquilla para OUT
-        elif self.objetivo == 3:
-            self.fill_color = self.color_io
-            self.texto = "I/O"
-            self.con_horquilla = False  # Sin horquilla para I/O
-        else:
-            self.fill_color = self.color_default
-            self.texto = str(self.nodo.get('id', ''))
-            self.con_horquilla = True  # Con horquilla para nodos comunes
-        
+        # Re-determinar visualización
+        self._determinar_visualizacion()
         self.update()
 
     def mouseDoubleClickEvent(self, event):
