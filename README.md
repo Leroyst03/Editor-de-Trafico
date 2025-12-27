@@ -33,7 +33,7 @@ Si tienes python3: ``python3 main.py``, de lo contrario ``python main.py``
 * Muestra los IDs de los nodos creados hasta el momento
 
 ### Menú lateral rutas
-* Muestra la cantidad de rutas con su origen y destino
+* Muestra la cantidad de rutas con un nombre, su origen y destino
 
 ### Panel lateral de propiedades 
 * Muestra y permite edición de las propiedades de el nodo o ruta que se haya seleccionado
