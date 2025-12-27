@@ -71,6 +71,10 @@ class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
         if not hasattr(self, "rutas") or self.rutas is None:
             self.rutas = []
         
+        # Asegurar que la ruta tenga un nombre por defecto si no lo tiene
+        if "nombre" not in ruta_dict:
+            ruta_dict["nombre"] = "Ruta"
+        
         self.rutas.append(ruta_dict)
         # Notificar que se agregó una ruta
         self.ruta_agregada.emit(ruta_dict)
@@ -108,6 +112,9 @@ class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
             
             # Crear copia de la ruta con nodos completos
             ruta_completa = {}
+            
+            # Copiar nombre si existe, sino asignar "Ruta" por defecto
+            ruta_completa["nombre"] = ruta_dict.get("nombre", "Ruta")
             
             # Origen completo
             origen = ruta_dict.get("origen")
@@ -190,6 +197,9 @@ class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
         rutas_completas = []
         for ruta_simp in rutas_simplificadas:
             ruta_completa = {}
+            
+            # Nombre de la ruta (si no existe, asignar "Ruta" por defecto)
+            ruta_completa['nombre'] = ruta_simp.get('nombre', 'Ruta')
             
             # Origen
             origen = ruta_simp.get('origen')
@@ -282,6 +292,9 @@ class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
                             except Exception:
                                 rdict2 = r
                             if rdict2 is rdict or r is rdict:
+                                # Mantener el nombre si ya existe
+                                if "nombre" in rdict:
+                                    rdict["nombre"] = rdict.get("nombre", "Ruta")
                                 self.rutas[i] = rdict
                                 break
                     except Exception:
