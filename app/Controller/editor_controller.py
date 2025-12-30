@@ -13,6 +13,7 @@ from Controller.ruta_controller import RutaController
 from View.view import NodoListItemWidget, RutaListItemWidget
 from View.node_item import NodoItem
 import ast
+import copy
 
 class EditorController(QObject):
     def __init__(self, view, proyecto=None):
@@ -141,6 +142,65 @@ class EditorController(QObject):
 
         # Asegurar que el cursor inicial sea correcto
         self._actualizar_cursor()
+
+    def _registrar_eliminacion_nodo(self, nodo_copia, rutas_afectadas):
+        """
+        Registra la eliminación de un nodo en el historial UNDO/REDO.
+        
+        Args:
+            nodo_copia: Copia del nodo eliminado
+            rutas_afectadas: Lista de rutas que contenían el nodo antes de eliminarlo
+        """
+        try:
+            # Si estamos en medio del historial (por deshacer previo), eliminar movimientos futuros
+            if self.indice_historial < len(self.historial_movimientos) - 1:
+                self.historial_movimientos = self.historial_movimientos[:self.indice_historial + 1]
+            
+            # GUARDAR SNAPSHOT COMPLETO DEL ESTADO DESPUÉS DE LA ELIMINACIÓN
+            # 1. Estado de las rutas después de la eliminación
+            rutas_despues = []
+            for idx, ruta in enumerate(self.proyecto.rutas):
+                try:
+                    # Copia profunda de la ruta
+                    ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+                    rutas_despues.append(copy.deepcopy(ruta_dict))
+                except Exception as e:
+                    print(f"Error copiando ruta {idx} para historial: {e}")
+                    rutas_despues.append(None)
+            
+            # 2. Estado de visibilidad después de la eliminación
+            visibilidad_nodos_despues = copy.deepcopy(self.visibilidad_nodos)
+            visibilidad_rutas_despues = copy.deepcopy(self.visibilidad_rutas)
+            nodo_en_rutas_despues = copy.deepcopy(self.nodo_en_rutas)
+            
+            # Crear entrada del historial para eliminación
+            eliminacion = {
+                'tipo': 'eliminacion',
+                'nodo': nodo_copia,
+                'rutas_afectadas': rutas_afectadas,  # Para deshacer (estado antes)
+                'rutas_despues': rutas_despues,       # Para rehacer (estado después)
+                'visibilidad_nodos_despues': visibilidad_nodos_despues,
+                'visibilidad_rutas_despues': visibilidad_rutas_despues,
+                'nodo_en_rutas_despues': nodo_en_rutas_despues,
+                'descripcion': f"Eliminación de nodo ID {nodo_copia.get('id')}"
+            }
+            
+            # Agregar al historial
+            self.historial_movimientos.append(eliminacion)
+            
+            # Limitar tamaño del historial
+            if len(self.historial_movimientos) > self.max_historial:
+                self.historial_movimientos.pop(0)
+            else:
+                self.indice_historial += 1
+            
+            # Mover puntero a la última posición
+            self.indice_historial = len(self.historial_movimientos) - 1
+            
+            print(f"✓ Eliminación registrada en historial: Nodo ID {nodo_copia.get('id')}")
+            
+        except Exception as e:
+            print(f"Error registrando eliminación en historial: {e}")
 
     # --- MÉTODOS DE CONVERSIÓN PÍXELES-METROS ---
     def pixeles_a_metros(self, valor_px):
@@ -744,116 +804,318 @@ class EditorController(QObject):
     def deshacer_movimiento(self):
         """Deshace el último movimiento (Ctrl+Z)"""
         if self.indice_historial < 0:
-            print("No hay movimientos para deshacer")
+            print("No hay acciones para deshacer")
             return
             
         try:
-            # Obtener el movimiento actual
-            movimiento = self.historial_movimientos[self.indice_historial]
-            nodo_id = movimiento['nodo_id']
-            x_anterior = movimiento['x_anterior']
-            y_anterior = movimiento['y_anterior']
+            # Obtener la acción actual
+            accion = self.historial_movimientos[self.indice_historial]
             
-            # Mostrar en metros
-            x_anterior_m = self.pixeles_a_metros(x_anterior)
-            y_anterior_m = self.pixeles_a_metros(y_anterior)
-            print(f"Deshaciendo movimiento: Nodo {nodo_id} a ({x_anterior_m:.2f},{y_anterior_m:.2f}) metros")
-            
-            # Buscar el nodo en la escena
-            nodo_encontrado = False
-            for item in self.scene.items():
-                if isinstance(item, NodoItem):
-                    if item.nodo.get('id') == nodo_id:
-                        # Mover el nodo a la posición anterior
-                        item.setPos(x_anterior - item.size / 2, y_anterior - item.size / 2)
-                        
-                        # Actualizar el modelo
-                        if isinstance(item.nodo, dict):
-                            item.nodo["X"] = x_anterior
-                            item.nodo["Y"] = y_anterior
-                        else:
-                            setattr(item.nodo, "X", x_anterior)
-                            setattr(item.nodo, "Y", y_anterior)
-                        
-                        # Actualizar UI
-                        self.actualizar_lista_nodo(item.nodo)
-                        self.actualizar_propiedades_valores(item.nodo, claves=("X", "Y"))
-                        
-                        # Actualizar rutas
-                        self._dibujar_rutas()
-                        
-                        nodo_encontrado = True
-                        break
-            
-            if nodo_encontrado:
-                # Decrementar índice del historial
-                self.indice_historial -= 1
-                print(f"Movimiento deshecho. Índice actual: {self.indice_historial}")
+            # Verificar el tipo de acción
+            if accion.get('tipo') == 'eliminacion':
+                self._deshacer_eliminacion_nodo(accion)
             else:
-                print(f"Error: No se encontró el nodo {nodo_id}")
+                # Acción de movimiento (comportamiento original)
+                self._deshacer_movimiento_original(accion)
                 
         except Exception as e:
-            print(f"Error deshaciendo movimiento: {e}")
-    
+            print(f"Error deshaciendo acción: {e}")
+        
+    def _deshacer_movimiento_original(self, movimiento):
+        """Método auxiliar para deshacer movimientos (código original)"""
+        nodo_id = movimiento['nodo_id']
+        x_anterior = movimiento['x_anterior']
+        y_anterior = movimiento['y_anterior']
+        
+        # Mostrar en metros
+        x_anterior_m = self.pixeles_a_metros(x_anterior)
+        y_anterior_m = self.pixeles_a_metros(y_anterior)
+        print(f"Deshaciendo movimiento: Nodo {nodo_id} a ({x_anterior_m:.2f},{y_anterior_m:.2f}) metros")
+        
+        # Buscar el nodo en la escena
+        nodo_encontrado = False
+        for item in self.scene.items():
+            if isinstance(item, NodoItem):
+                if item.nodo.get('id') == nodo_id:
+                    # Mover el nodo a la posición anterior
+                    item.setPos(x_anterior - item.size / 2, y_anterior - item.size / 2)
+                    
+                    # Actualizar el modelo
+                    if isinstance(item.nodo, dict):
+                        item.nodo["X"] = x_anterior
+                        item.nodo["Y"] = y_anterior
+                    else:
+                        setattr(item.nodo, "X", x_anterior)
+                        setattr(item.nodo, "Y", y_anterior)
+                    
+                    # Actualizar UI
+                    self.actualizar_lista_nodo(item.nodo)
+                    self.actualizar_propiedades_valores(item.nodo, claves=("X", "Y"))
+                    
+                    # Actualizar rutas
+                    self._dibujar_rutas()
+                    
+                    nodo_encontrado = True
+                    break
+        
+        if nodo_encontrado:
+            # Decrementar índice del historial
+            self.indice_historial -= 1
+            print(f"Movimiento deshecho. Índice actual: {self.indice_historial}")
+        else:
+            print(f"Error: No se encontró el nodo {nodo_id}")
+
+    def _deshacer_eliminacion_nodo(self, eliminacion):
+        """
+        Deshace la eliminación de un nodo restaurándolo junto con sus rutas.
+        Usa el estado 'antes' guardado en el historial.
+        """
+        try:
+            nodo = eliminacion['nodo']
+            rutas_afectadas = eliminacion['rutas_afectadas']
+            nodo_id = nodo.get('id')
+            
+            print(f"Deshaciendo eliminación: Nodo ID {nodo_id}")
+            
+            # 1) Restaurar el nodo en el proyecto
+            self.proyecto.nodos.append(nodo)
+            
+            # 2) Restaurar las rutas afectadas a su estado original
+            for ruta_info in rutas_afectadas:
+                ruta_idx = ruta_info['indice']
+                ruta_original = ruta_info['ruta_original']
+                
+                if ruta_idx < len(self.proyecto.rutas):
+                    self.proyecto.rutas[ruta_idx] = ruta_original
+                else:
+                    self.proyecto.rutas.append(ruta_original)
+            
+            # 3) Restaurar visibilidad y relaciones (usar estado del momento actual)
+            self.visibilidad_nodos[nodo_id] = True
+            
+            # Reconstruir relaciones para este nodo
+            if nodo_id not in self.nodo_en_rutas:
+                self.nodo_en_rutas[nodo_id] = []
+            
+            # Buscar en qué rutas está este nodo
+            for idx, ruta in enumerate(self.proyecto.rutas):
+                try:
+                    ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+                    self._normalize_route_nodes(ruta_dict)
+                    
+                    # Verificar si la ruta contiene el nodo
+                    if self._ruta_contiene_nodo(ruta_dict, nodo_id):
+                        if idx not in self.nodo_en_rutas[nodo_id]:
+                            self.nodo_en_rutas[nodo_id].append(idx)
+                except Exception as e:
+                    print(f"Error verificando ruta {idx}: {e}")
+            
+            # 4) Crear y añadir el NodoItem visual a la escena
+            nodo_item = self._create_nodo_item(nodo)
+            
+            # 5) Inicializar visibilidad del nodo restaurado
+            self._inicializar_nodo_visibilidad(nodo, agregar_a_lista=True)
+            
+            # 6) Actualizar listas y dibujar rutas
+            self._actualizar_lista_nodos_con_widgets()
+            self._actualizar_lista_rutas_con_widgets()
+            self._dibujar_rutas()
+            
+            # 7) Decrementar índice del historial
+            self.indice_historial -= 1
+            
+            print(f"✓ Nodo ID {nodo_id} restaurado exitosamente")
+            print(f"  Rutas restauradas: {[r['indice'] for r in rutas_afectadas]}")
+            
+        except Exception as e:
+            print(f"Error deshaciendo eliminación: {e}")
+
+    def _eliminar_nodo_sin_historial(self, nodo, nodo_item):
+        """
+        Elimina un nodo sin registrar en el historial UNDO/REDO.
+        Usado para rehacer eliminaciones.
+        """
+        try:
+            nodo_id = nodo.get("id")
+            
+            # 1) Quitar de la escena el NodoItem visual
+            try:
+                if getattr(nodo_item, "scene", None) and nodo_item.scene() is not None:
+                    self.scene.removeItem(nodo_item)
+            except Exception:
+                pass
+            
+            # 2) Quitar del modelo
+            for i, n in enumerate(self.proyecto.nodos):
+                if n.get("id") == nodo_id:
+                    self.proyecto.nodos.pop(i)
+                    break
+            
+            # 3) Eliminar de visibilidad y relaciones
+            if nodo_id in self.visibilidad_nodos:
+                del self.visibilidad_nodos[nodo_id]
+            if nodo_id in self.nodo_en_rutas:
+                del self.nodo_en_rutas[nodo_id]
+            
+            # 4) Reconfigurar rutas
+            self._reconfigurar_rutas_por_eliminacion(nodo_id)
+            
+            # 5) IMPORTANTE: Reconstruir relaciones de TODAS las rutas después de la eliminación
+            # Esta es la parte crítica que faltaba
+            self._actualizar_todas_relaciones_nodo_ruta()
+            
+            # 6) Actualizar UI
+            self._actualizar_lista_nodos_con_widgets()
+            self._dibujar_rutas()
+            self._actualizar_lista_rutas_con_widgets()
+            
+            print(f"✓ Nodo ID {nodo_id} reeliminado")
+            
+        except Exception as e:
+            print(f"Error en eliminación sin historial: {e}")
+
+    def _rehacer_eliminacion_nodo(self, eliminacion):
+        """
+        Rehace la eliminación de un nodo restaurando el estado COMPLETO después de la eliminación.
+        """
+        try:
+            nodo = eliminacion['nodo']
+            rutas_despues = eliminacion['rutas_despues']
+            nodo_id = nodo.get('id')
+            
+            print(f"Rehaciendo eliminación: Nodo ID {nodo_id}")
+            
+            # 1) RESTAURAR ESTADO COMPLETO DE LAS RUTAS
+            self.proyecto.rutas = []
+            for ruta_dict in rutas_despues:
+                if ruta_dict is not None:
+                    self.proyecto.rutas.append(ruta_dict)
+            
+            # 2) RESTAURAR ESTADO COMPLETO DE VISIBILIDAD
+            self.visibilidad_nodos = eliminacion.get('visibilidad_nodos_despues', {})
+            self.visibilidad_rutas = eliminacion.get('visibilidad_rutas_despues', {})
+            self.nodo_en_rutas = eliminacion.get('nodo_en_rutas_despues', {})
+            
+            # 3) ACTUALIZAR NODOS DEL PROYECTO (eliminar el nodo reinsertado)
+            self.proyecto.nodos = [n for n in self.proyecto.nodos if n.get('id') != nodo_id]
+            
+            # 4) ELIMINAR NODOITEM DE LA ESCENA
+            nodo_item_a_eliminar = None
+            for item in self.scene.items():
+                if isinstance(item, NodoItem) and item.nodo.get('id') == nodo_id:
+                    nodo_item_a_eliminar = item
+                    break
+            
+            if nodo_item_a_eliminar:
+                try:
+                    if nodo_item_a_eliminar.scene() is not None:
+                        self.scene.removeItem(nodo_item_a_eliminar)
+                except Exception as e:
+                    print(f"Error removiendo nodo de escena: {e}")
+            
+            # 5) ACTUALIZAR UI COMPLETA
+            self._actualizar_lista_nodos_con_widgets()
+            self._actualizar_lista_rutas_con_widgets()
+            self._dibujar_rutas()
+            
+            print(f"✓ Nodo ID {nodo_id} reeliminado exitosamente")
+            print(f"  Estado completo restaurado desde snapshot")
+            
+        except Exception as e:
+            print(f"Error rehaciendo eliminación: {e}")
+            # En caso de error, revertir el incremento del índice
+            if self.indice_historial > 0:
+                self.indice_historial -= 1
+
+    def _rehacer_movimiento_original(self, movimiento):
+        """Método auxiliar para rehacer movimientos (código original)"""
+        nodo_id = movimiento['nodo_id']
+        x_nueva = movimiento['x_nueva']
+        y_nueva = movimiento['y_nueva']
+        
+        # Mostrar en metros
+        x_nueva_m = self.pixeles_a_metros(x_nueva)
+        y_nueva_m = self.pixeles_a_metros(y_nueva)
+        print(f"Rehaciendo movimiento: Nodo {nodo_id} a ({x_nueva_m:.2f},{y_nueva_m:.2f}) metros")
+        
+        # Buscar el nodo en la escena
+        nodo_encontrado = False
+        for item in self.scene.items():
+            if isinstance(item, NodoItem):
+                if item.nodo.get('id') == nodo_id:
+                    # Mover el nodo a la nueva posición
+                    item.setPos(x_nueva - item.size / 2, y_nueva - item.size / 2)
+                    
+                    # Actualizar el modelo
+                    if isinstance(item.nodo, dict):
+                        item.nodo["X"] = x_nueva
+                        item.nodo["Y"] = y_nueva
+                    else:
+                        setattr(item.nodo, "X", x_nueva)
+                        setattr(item.nodo, "Y", y_nueva)
+                    
+                    # Actualizar UI
+                    self.actualizar_lista_nodo(item.nodo)
+                    self.actualizar_propiedades_valores(item.nodo, claves=("X", "Y"))
+                    
+                    # Actualizar rutas
+                    self._dibujar_rutas()
+                    
+                    nodo_encontrado = True
+                    break
+        
+        if not nodo_encontrado:
+            print(f"Error: No se encontró el nodo {nodo_id}")
+            # Si no encontramos el nodo, revertir el incremento del índice
+            self.indice_historial -= 1
+
     def rehacer_movimiento(self):
-        """Rehace el movimiento deshecho (Ctrl+Y)"""
+        """Rehacer el movimiento deshecho (Ctrl+Y)"""
         if self.indice_historial >= len(self.historial_movimientos) - 1:
-            print("No hay movimientos para rehacer")
+            print("No hay acciones para rehacer")
             return
             
         try:
             # Incrementar índice primero
             self.indice_historial += 1
             
-            # Obtener el movimiento a rehacer
-            movimiento = self.historial_movimientos[self.indice_historial]
-            nodo_id = movimiento['nodo_id']
-            x_nueva = movimiento['x_nueva']
-            y_nueva = movimiento['y_nueva']
+            # Obtener la acción a rehacer
+            accion = self.historial_movimientos[self.indice_historial]
             
-            # Mostrar en metros
-            x_nueva_m = self.pixeles_a_metros(x_nueva)
-            y_nueva_m = self.pixeles_a_metros(y_nueva)
-            print(f"Rehaciendo movimiento: Nodo {nodo_id} a ({x_nueva_m:.2f},{y_nueva_m:.2f}) metros")
-            
-            # Buscar el nodo en la escena
-            nodo_encontrado = False
-            for item in self.scene.items():
-                if isinstance(item, NodoItem):
-                    if item.nodo.get('id') == nodo_id:
-                        # Mover el nodo a la nueva posición
-                        item.setPos(x_nueva - item.size / 2, y_nueva - item.size / 2)
-                        
-                        # Actualizar el modelo
-                        if isinstance(item.nodo, dict):
-                            item.nodo["X"] = x_nueva
-                            item.nodo["Y"] = y_nueva
-                        else:
-                            setattr(item.nodo, "X", x_nueva)
-                            setattr(item.nodo, "Y", y_nueva)
-                        
-                        # Actualizar UI
-                        self.actualizar_lista_nodo(item.nodo)
-                        self.actualizar_propiedades_valores(item.nodo, claves=("X", "Y"))
-                        
-                        # Actualizar rutas
-                        self._dibujar_rutas()
-                        
-                        nodo_encontrado = True
-                        break
-            
-            if not nodo_encontrado:
-                print(f"Error: No se encontró el nodo {nodo_id}")
-                # Si no encontramos el nodo, revertir el incremento del índice
-                self.indice_historial -= 1
+            # Verificar el tipo de acción
+            if accion.get('tipo') == 'eliminacion':
+                self._rehacer_eliminacion_nodo(accion)
             else:
-                print(f"Movimiento rehecho. Índice actual: {self.indice_historial}")
+                # Acción de movimiento (comportamiento original)
+                self._rehacer_movimiento_original(accion)
                 
         except Exception as e:
-            print(f"Error rehaciendo movimiento: {e}")
+            print(f"Error rehaciendo acción: {e}")
             # En caso de error, revertir el incremento del índice
             if self.indice_historial > 0:
                 self.indice_historial -= 1
+
+    def _ruta_contiene_nodo(self, ruta_dict, nodo_id):
+        """Verifica si una ruta contiene un nodo específico"""
+        try:
+            # Origen
+            origen = ruta_dict.get("origen")
+            if origen and isinstance(origen, dict) and origen.get('id') == nodo_id:
+                return True
+            
+            # Destino
+            destino = ruta_dict.get("destino")
+            if destino and isinstance(destino, dict) and destino.get('id') == nodo_id:
+                return True
+            
+            # Visita
+            for nodo_visita in ruta_dict.get("visita", []):
+                if isinstance(nodo_visita, dict) and nodo_visita.get('id') == nodo_id:
+                    return True
+            
+            return False
+        except Exception:
+            return False
 
     # --- FUNCIONES DE PROYECTO ---
     
@@ -2028,6 +2290,48 @@ class EditorController(QObject):
         - Actualiza la lista lateral de nodos y rutas y limpia el panel de propiedades si procede.
         """
         try:
+            # GUARDAR INFORMACIÓN PARA UNDO
+            # Guardar una copia profunda del nodo y rutas afectadas
+            nodo_copia = copy.deepcopy(nodo)
+            
+            # Encontrar todas las rutas que contienen este nodo
+            rutas_afectadas = []
+            if hasattr(self.proyecto, 'rutas'):
+                for idx, ruta in enumerate(self.proyecto.rutas):
+                    try:
+                        ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+                        self._normalize_route_nodes(ruta_dict)
+                        
+                        # Verificar si la ruta contiene el nodo
+                        contiene_nodo = False
+                        
+                        # Origen
+                        origen = ruta_dict.get("origen")
+                        if origen and isinstance(origen, dict) and origen.get('id') == nodo.get('id'):
+                            contiene_nodo = True
+                        
+                        # Destino
+                        destino = ruta_dict.get("destino")
+                        if not contiene_nodo and destino and isinstance(destino, dict) and destino.get('id') == nodo.get('id'):
+                            contiene_nodo = True
+                        
+                        # Visita
+                        if not contiene_nodo:
+                            for nodo_visita in ruta_dict.get("visita", []):
+                                if isinstance(nodo_visita, dict) and nodo_visita.get('id') == nodo.get('id'):
+                                    contiene_nodo = True
+                                    break
+                        
+                        if contiene_nodo:
+                            # Guardar una copia de la ruta antes de modificar
+                            rutas_afectadas.append({
+                                'indice': idx,
+                                'ruta_original': copy.deepcopy(ruta_dict)
+                            })
+                    except Exception as e:
+                        print(f"Error al procesar ruta para undo: {e}")
+                        continue
+            
             # 1) Quitar de la escena el NodoItem visual si sigue vivo
             try:
                 if getattr(nodo_item, "scene", None) and nodo_item.scene() is not None:
@@ -2038,14 +2342,25 @@ class EditorController(QObject):
             nodo_id = nodo.get("id")
 
             # 2) Quitar del modelo por identidad o por id
+            nodo_encontrado = False
             try:
                 if nodo in self.proyecto.nodos:
                     self.proyecto.nodos.remove(nodo)
+                    nodo_encontrado = True
                 else:
-                    self.proyecto.nodos = [n for n in self.proyecto.nodos if n.get("id") != nodo_id]
+                    # Buscar por ID
+                    for i, n in enumerate(self.proyecto.nodos):
+                        if n.get("id") == nodo_id:
+                            self.proyecto.nodos.pop(i)
+                            nodo_encontrado = True
+                            break
             except Exception:
                 # fallback por id
                 self.proyecto.nodos = [n for n in getattr(self.proyecto, "nodos", []) if n.get("id") != nodo_id]
+                nodo_encontrado = True
+
+            if not nodo_encontrado:
+                print(f"Advertencia: Nodo {nodo_id} no encontrado en proyecto.nodos")
 
             # 3) Eliminar de visibilidad y relaciones
             if nodo_id in self.visibilidad_nodos:
@@ -2083,6 +2398,9 @@ class EditorController(QObject):
 
             # 6) Actualizar lista de nodos
             self._actualizar_lista_nodos_con_widgets()
+
+            # 7) REGISTRAR LA ELIMINACIÓN EN EL HISTORIAL
+            self._registrar_eliminacion_nodo(nodo_copia, rutas_afectadas)
 
             print(f"Nodo eliminado: {nodo_id}")
         except Exception as err:
