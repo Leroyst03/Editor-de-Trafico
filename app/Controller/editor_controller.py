@@ -28,8 +28,7 @@ class EditorController(QObject):
         self._cursor_sobre_nodo = False
         self._arrastrando_nodo = False  # Para rastrear si estamos arrastrando un nodo
 
-        if self.proyecto:
-            self._conectar_señales_proyecto()
+        self._conectar_señales_proyecto()
 
         # --- Inicializar escena con padre ---
         self.scene = QGraphicsScene(self.view.marco_trabajo)
@@ -109,10 +108,10 @@ class EditorController(QObject):
         self.historial_movimientos = []  # Lista de movimientos
         self.indice_historial = -1  # Puntero a la posición actual en el historial (-1 = vacío)
         self.max_historial = 100  # Límite de cambios en el historial
-        
         # Movimiento actual en progreso (para guardar en historial)
         self.movimiento_actual = None  # {'nodo': nodo_item, 'x_inicial': x, 'y_inicial': y}
-        
+        self._ejecutando_deshacer_rehacer = False
+
         # --- SISTEMA DE VISIBILIDAD MEJORADO CON RECONSTRUCCIÓN DE RUTAS ---
         self.visibilidad_nodos = {}  # {nodo_id: visible} - Para UI
         self.visibilidad_rutas = {}  # {ruta_index: visible} - Para líneas
@@ -717,6 +716,386 @@ class EditorController(QObject):
 
     # --- SISTEMA DE DESHACER/REHACER (UNDO/REDO) ---
     
+    # --- MÉTODOS PARA REGISTRAR CAMBIOS DE PROPIEDADES ---
+    def registrar_cambio_propiedad_nodo(self, nodo_id, propiedad, valor_anterior, valor_nuevo):
+        """
+        Registra un cambio de propiedad de un nodo en el historial UNDO/REDO.
+        
+        Args:
+            nodo_id: ID del nodo
+            propiedad: Nombre de la propiedad (ej: 'objetivo', 'es_cargador')
+            valor_anterior: Valor antes del cambio
+            valor_nuevo: Valor después del cambio
+        """
+        if self._ejecutando_deshacer_rehacer:
+            return
+        
+        try:
+            # Si estamos en medio del historial (por deshacer previo), eliminar movimientos futuros
+            if self.indice_historial < len(self.historial_movimientos) - 1:
+                self.historial_movimientos = self.historial_movimientos[:self.indice_historial + 1]
+            
+            # Crear entrada del historial
+            cambio = {
+                'tipo': 'cambio_propiedad_nodo',
+                'nodo_id': nodo_id,
+                'propiedad': propiedad,
+                'valor_anterior': valor_anterior,
+                'valor_nuevo': valor_nuevo,
+                'descripcion': f"Cambio de {propiedad} en nodo {nodo_id}: {valor_anterior} → {valor_nuevo}"
+            }
+            
+            # Agregar al historial
+            self.historial_movimientos.append(cambio)
+            
+            # Limitar tamaño del historial
+            if len(self.historial_movimientos) > self.max_historial:
+                self.historial_movimientos.pop(0)
+            else:
+                self.indice_historial += 1
+            
+            # Mover puntero a la última posición
+            self.indice_historial = len(self.historial_movimientos) - 1
+            
+            print(f"✓ Cambio de propiedad registrado: Nodo {nodo_id}.{propiedad} = {valor_nuevo}")
+            
+        except Exception as e:
+            print(f"Error registrando cambio de propiedad de nodo: {e}")
+
+    def registrar_cambio_propiedad_ruta(self, ruta_idx, propiedad, valor_anterior, valor_nuevo):
+        """
+        Registra un cambio de propiedad de una ruta en el historial UNDO/REDO.
+        
+        Args:
+            ruta_idx: Índice de la ruta
+            propiedad: Nombre de la propiedad (ej: 'nombre', 'origen', 'destino', 'visita')
+            valor_anterior: Valor antes del cambio
+            valor_nuevo: Valor después del cambio
+        """
+        if self._ejecutando_deshacer_rehacer:
+            return
+        
+        try:
+            # Si estamos en medio del historial (por deshacer previo), eliminar movimientos futuros
+            if self.indice_historial < len(self.historial_movimientos) - 1:
+                self.historial_movimientos = self.historial_movimientos[:self.indice_historial + 1]
+            
+            # Crear entrada del historial
+            cambio = {
+                'tipo': 'cambio_propiedad_ruta',
+                'ruta_idx': ruta_idx,
+                'propiedad': propiedad,
+                'valor_anterior': valor_anterior,
+                'valor_nuevo': valor_nuevo,
+                'descripcion': f"Cambio de {propiedad} en ruta {ruta_idx}"
+            }
+            
+            # Agregar al historial
+            self.historial_movimientos.append(cambio)
+            
+            # Limitar tamaño del historial
+            if len(self.historial_movimientos) > self.max_historial:
+                self.historial_movimientos.pop(0)
+            else:
+                self.indice_historial += 1
+            
+            # Mover puntero a la última posición
+            self.indice_historial = len(self.historial_movimientos) - 1
+            
+            print(f"✓ Cambio de propiedad registrado: Ruta {ruta_idx}.{propiedad}")
+            
+        except Exception as e:
+            print(f"Error registrando cambio de propiedad de ruta: {e}")
+
+    def _deshacer_cambio_propiedad_nodo(self, accion):
+        """Deshace un cambio de propiedad de nodo usando el patrón observer"""
+        try:
+            self._ejecutando_deshacer_rehacer = True
+            
+            nodo_id = accion['nodo_id']
+            propiedad = accion['propiedad']
+            valor_anterior = accion['valor_anterior']
+            
+            print(f"Deshaciendo cambio: Nodo {nodo_id}.{propiedad} = {valor_anterior}")
+            
+            # Buscar el nodo
+            nodo = self.obtener_nodo_por_id(nodo_id)
+            if not nodo:
+                print(f"Error: Nodo {nodo_id} no encontrado")
+                self._ejecutando_deshacer_rehacer = False
+                return
+            
+            # Convertir valores si es necesario
+            if propiedad in ["X", "Y"]:
+                # Convertir de metros a píxeles
+                try:
+                    valor_metros = float(valor_anterior)
+                    valor_pixeles = self.metros_a_pixeles(valor_metros)
+                    
+                    # IMPORTANTE: Usar el proyecto para actualizar (emitirá señal)
+                    self.proyecto.actualizar_nodo({
+                        "id": nodo_id,
+                        propiedad: valor_pixeles
+                    })
+                    
+                    print(f"✓ Cambio deshecho usando proyecto: Nodo {nodo_id}.{propiedad} = {valor_anterior} metros")
+                    
+                except ValueError as e:
+                    print(f"Error convirtiendo valor: {e}")
+            else:
+                # Otras propiedades - usar el proyecto para actualizar
+                self.proyecto.actualizar_nodo({
+                    "id": nodo_id,
+                    propiedad: valor_anterior
+                })
+                
+                print(f"✓ Cambio deshecho usando proyecto: Nodo {nodo_id}.{propiedad} = {valor_anterior}")
+            
+            # Decrementar índice del historial
+            self.indice_historial -= 1
+            
+        except Exception as e:
+            print(f"Error deshaciendo cambio de propiedad de nodo: {e}")
+        finally:
+            self._ejecutando_deshacer_rehacer = False
+
+    def _rehacer_cambio_propiedad_nodo(self, accion):
+        """Rehace un cambio de propiedad de nodo usando el patrón observer"""
+        try:
+            self._ejecutando_deshacer_rehacer = True
+            
+            nodo_id = accion['nodo_id']
+            propiedad = accion['propiedad']
+            valor_nuevo = accion['valor_nuevo']
+            
+            print(f"Rehaciendo cambio: Nodo {nodo_id}.{propiedad} = {valor_nuevo}")
+            
+            # Buscar el nodo
+            nodo = self.obtener_nodo_por_id(nodo_id)
+            if not nodo:
+                print(f"Error: Nodo {nodo_id} no encontrado")
+                self._ejecutando_deshacer_rehacer = False
+                return
+            
+            # Convertir valores si es necesario
+            if propiedad in ["X", "Y"]:
+                # Convertir de metros a píxeles
+                try:
+                    valor_metros = float(valor_nuevo)
+                    valor_pixeles = self.metros_a_pixeles(valor_metros)
+                    
+                    # IMPORTANTE: Usar el proyecto para actualizar (emitirá señal)
+                    self.proyecto.actualizar_nodo({
+                        "id": nodo_id,
+                        propiedad: valor_pixeles
+                    })
+                    
+                    print(f"✓ Cambio rehecho usando proyecto: Nodo {nodo_id}.{propiedad} = {valor_nuevo} metros")
+                    
+                except ValueError as e:
+                    print(f"Error convirtiendo valor: {e}")
+            else:
+                # Otras propiedades - usar el proyecto para actualizar
+                self.proyecto.actualizar_nodo({
+                    "id": nodo_id,
+                    propiedad: valor_nuevo
+                })
+                
+                print(f"✓ Cambio rehecho usando proyecto: Nodo {nodo_id}.{propiedad} = {valor_nuevo}")
+            
+        except Exception as e:
+            print(f"Error rehaciendo cambio de propiedad de nodo: {e}")
+        finally:
+            self._ejecutando_deshacer_rehacer = False
+
+    def _deshacer_cambio_propiedad_ruta(self, accion):
+        """Deshace un cambio de propiedad de ruta"""
+        try:
+            self._ejecutando_deshacer_rehacer = True
+            
+            ruta_idx = accion['ruta_idx']
+            propiedad = accion['propiedad']
+            valor_anterior = accion['valor_anterior']
+            
+            print(f"Deshaciendo cambio: Ruta {ruta_idx}.{propiedad} = {valor_anterior}")
+            
+            # Verificar que existe la ruta
+            if ruta_idx >= len(self.proyecto.rutas):
+                print(f"Error: Ruta {ruta_idx} no encontrada")
+                self._ejecutando_deshacer_rehacer = False
+                return
+            
+            ruta = self.proyecto.rutas[ruta_idx]
+            try:
+                ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+            except Exception:
+                ruta_dict = ruta
+            
+            # Aplicar el valor anterior según la propiedad
+            if propiedad == "nombre":
+                ruta_dict["nombre"] = valor_anterior
+            elif propiedad == "origen":
+                try:
+                    origen_id = int(valor_anterior)
+                    nodo_existente = next((n for n in self.proyecto.nodos 
+                                        if self._obtener_id_nodo(n) == origen_id), None)
+                    if nodo_existente:
+                        ruta_dict["origen"] = nodo_existente
+                    else:
+                        ruta_dict["origen"] = {"id": origen_id, "X": 0, "Y": 0}
+                except ValueError:
+                    print(f"Error: ID de origen inválido: {valor_anterior}")
+            elif propiedad == "destino":
+                try:
+                    destino_id = int(valor_anterior)
+                    nodo_existente = next((n for n in self.proyecto.nodos 
+                                        if self._obtener_id_nodo(n) == destino_id), None)
+                    if nodo_existente:
+                        ruta_dict["destino"] = nodo_existente
+                    else:
+                        ruta_dict["destino"] = {"id": destino_id, "X": 0, "Y": 0}
+                except ValueError:
+                    print(f"Error: ID de destino inválido: {valor_anterior}")
+            elif propiedad == "visita":
+                try:
+                    # Parsear lista de IDs
+                    if valor_anterior.startswith('[') and valor_anterior.endswith(']'):
+                        valor_anterior = valor_anterior[1:-1]
+                    
+                    ids_texto = [id_str.strip() for id_str in valor_anterior.split(',')] if valor_anterior else []
+                    nueva_visita = []
+                    
+                    for id_str in ids_texto:
+                        if id_str:
+                            try:
+                                nodo_id = int(id_str)
+                                nodo_existente = next((n for n in self.proyecto.nodos 
+                                                    if self._obtener_id_nodo(n) == nodo_id), None)
+                                if nodo_existente:
+                                    nueva_visita.append(nodo_existente)
+                                else:
+                                    nueva_visita.append({"id": nodo_id, "X": 0, "Y": 0})
+                            except ValueError:
+                                pass
+                    
+                    ruta_dict["visita"] = nueva_visita
+                except Exception as e:
+                    print(f"Error procesando visita: {e}")
+            
+            # Actualizar la ruta en el proyecto
+            self.proyecto.actualizar_ruta(ruta_idx, ruta_dict)
+            
+            # Actualizar UI
+            self._actualizar_widget_ruta_en_lista(ruta_idx)
+            self._dibujar_rutas()
+            
+            # Si esta ruta está seleccionada, actualizar propiedades
+            if self.ruta_actual_idx == ruta_idx:
+                self.mostrar_propiedades_ruta(ruta)
+            
+            # Decrementar índice del historial
+            self.indice_historial -= 1
+            
+            print(f"✓ Cambio deshecho: Ruta {ruta_idx}.{propiedad}")
+            
+        except Exception as e:
+            print(f"Error deshaciendo cambio de propiedad de ruta: {e}")
+        finally:
+            self._ejecutando_deshacer_rehacer = False
+
+    def _rehacer_cambio_propiedad_ruta(self, accion):
+        """Rehace un cambio de propiedad de ruta"""
+        try:
+            self._ejecutando_deshacer_rehacer = True
+            
+            ruta_idx = accion['ruta_idx']
+            propiedad = accion['propiedad']
+            valor_nuevo = accion['valor_nuevo']
+            
+            print(f"Rehaciendo cambio: Ruta {ruta_idx}.{propiedad} = {valor_nuevo}")
+            
+            # Verificar que existe la ruta
+            if ruta_idx >= len(self.proyecto.rutas):
+                print(f"Error: Ruta {ruta_idx} no encontrada")
+                self._ejecutando_deshacer_rehacer = False
+                return
+            
+            ruta = self.proyecto.rutas[ruta_idx]
+            try:
+                ruta_dict = ruta.to_dict() if hasattr(ruta, "to_dict") else ruta
+            except Exception:
+                ruta_dict = ruta
+            
+            # Aplicar el valor nuevo según la propiedad
+            if propiedad == "nombre":
+                ruta_dict["nombre"] = valor_nuevo
+            elif propiedad == "origen":
+                try:
+                    origen_id = int(valor_nuevo)
+                    nodo_existente = next((n for n in self.proyecto.nodos 
+                                        if self._obtener_id_nodo(n) == origen_id), None)
+                    if nodo_existente:
+                        ruta_dict["origen"] = nodo_existente
+                    else:
+                        ruta_dict["origen"] = {"id": origen_id, "X": 0, "Y": 0}
+                except ValueError:
+                    print(f"Error: ID de origen inválido: {valor_nuevo}")
+            elif propiedad == "destino":
+                try:
+                    destino_id = int(valor_nuevo)
+                    nodo_existente = next((n for n in self.proyecto.nodos 
+                                        if self._obtener_id_nodo(n) == destino_id), None)
+                    if nodo_existente:
+                        ruta_dict["destino"] = nodo_existente
+                    else:
+                        ruta_dict["destino"] = {"id": destino_id, "X": 0, "Y": 0}
+                except ValueError:
+                    print(f"Error: ID de destino inválido: {valor_nuevo}")
+            elif propiedad == "visita":
+                try:
+                    # Parsear lista de IDs
+                    if valor_nuevo.startswith('[') and valor_nuevo.endswith(']'):
+                        valor_nuevo = valor_nuevo[1:-1]
+                    
+                    ids_texto = [id_str.strip() for id_str in valor_nuevo.split(',')] if valor_nuevo else []
+                    nueva_visita = []
+                    
+                    for id_str in ids_texto:
+                        if id_str:
+                            try:
+                                nodo_id = int(id_str)
+                                nodo_existente = next((n for n in self.proyecto.nodos 
+                                                    if self._obtener_id_nodo(n) == nodo_id), None)
+                                if nodo_existente:
+                                    nueva_visita.append(nodo_existente)
+                                else:
+                                    nueva_visita.append({"id": nodo_id, "X": 0, "Y": 0})
+                            except ValueError:
+                                pass
+                    
+                    ruta_dict["visita"] = nueva_visita
+                except Exception as e:
+                    print(f"Error procesando visita: {e}")
+            
+            # Actualizar la ruta en el proyecto
+            self.proyecto.actualizar_ruta(ruta_idx, ruta_dict)
+            
+            # Actualizar UI
+            self._actualizar_widget_ruta_en_lista(ruta_idx)
+            self._dibujar_rutas()
+            
+            # Si esta ruta está seleccionada, actualizar propiedades
+            if self.ruta_actual_idx == ruta_idx:
+                self.mostrar_propiedades_ruta(ruta)
+            
+            print(f"✓ Cambio rehecho: Ruta {ruta_idx}.{propiedad}")
+            
+        except Exception as e:
+            print(f"Error rehaciendo cambio de propiedad de ruta: {e}")
+        finally:
+            self._ejecutando_deshacer_rehacer = False
+
+
     def _limpiar_historial(self):
         """Limpia el historial de movimientos"""
         self.historial_movimientos = []
@@ -812,14 +1191,21 @@ class EditorController(QObject):
             accion = self.historial_movimientos[self.indice_historial]
             
             # Verificar el tipo de acción
-            if accion.get('tipo') == 'eliminacion':
+            tipo = accion.get('tipo')
+            
+            if tipo == 'eliminacion':
                 self._deshacer_eliminacion_nodo(accion)
+            elif tipo == 'cambio_propiedad_nodo':
+                self._deshacer_cambio_propiedad_nodo(accion)
+            elif tipo == 'cambio_propiedad_ruta':
+                self._deshacer_cambio_propiedad_ruta(accion)
             else:
                 # Acción de movimiento (comportamiento original)
                 self._deshacer_movimiento_original(accion)
                 
         except Exception as e:
             print(f"Error deshaciendo acción: {e}")
+
         
     def _deshacer_movimiento_original(self, movimiento):
         """Método auxiliar para deshacer movimientos (código original)"""
@@ -1069,6 +1455,7 @@ class EditorController(QObject):
             # Si no encontramos el nodo, revertir el incremento del índice
             self.indice_historial -= 1
 
+    
     def rehacer_movimiento(self):
         """Rehacer el movimiento deshecho (Ctrl+Y)"""
         if self.indice_historial >= len(self.historial_movimientos) - 1:
@@ -1083,8 +1470,14 @@ class EditorController(QObject):
             accion = self.historial_movimientos[self.indice_historial]
             
             # Verificar el tipo de acción
-            if accion.get('tipo') == 'eliminacion':
+            tipo = accion.get('tipo')
+            
+            if tipo == 'eliminacion':
                 self._rehacer_eliminacion_nodo(accion)
+            elif tipo == 'cambio_propiedad_nodo':
+                self._rehacer_cambio_propiedad_nodo(accion)
+            elif tipo == 'cambio_propiedad_ruta':
+                self._rehacer_cambio_propiedad_ruta(accion)
             else:
                 # Acción de movimiento (comportamiento original)
                 self._rehacer_movimiento_original(accion)
@@ -2036,38 +2429,53 @@ class EditorController(QObject):
             campo = data[1]
             texto = item.text().strip()
             
+            # Obtener el valor anterior ANTES de cambiarlo
+            valor_anterior = None
+            if campo == "nombre":
+                valor_anterior = ruta_dict.get("nombre", "")
+            elif campo == "origen":
+                valor_anterior = self._obtener_id_nodo(ruta_dict.get("origen"))
+            elif campo == "destino":
+                valor_anterior = self._obtener_id_nodo(ruta_dict.get("destino"))
+            elif campo == "visita":
+                valor_anterior = self._obtener_ids_visita(ruta_dict.get("visita", []))
+            
             print(f"Actualizando ruta - Campo: {campo}, Valor: {texto}")
             
             # Procesar según el campo
+            valor_nuevo = None
             if campo == "nombre":
+                valor_nuevo = texto
                 ruta_dict["nombre"] = texto
             elif campo == "origen":
                 try:
-                    nuevo_id = int(texto)
+                    valor_nuevo = int(texto)
                     # Buscar nodo existente o crear uno temporal
                     nodo_existente = next((n for n in getattr(self.proyecto, "nodos", []) 
-                                        if self._obtener_id_nodo(n) == nuevo_id), None)
+                                        if self._obtener_id_nodo(n) == valor_nuevo), None)
                     if nodo_existente:
                         ruta_dict["origen"] = nodo_existente
                     else:
                         # Crear nodo temporal (será normalizado después)
-                        ruta_dict["origen"] = {"id": nuevo_id, "X": 0, "Y": 0}
+                        ruta_dict["origen"] = {"id": valor_nuevo, "X": 0, "Y": 0}
                 except ValueError:
                     print(f"Error: ID de origen debe ser un número entero")
+                    return
                     
             elif campo == "destino":
                 try:
-                    nuevo_id = int(texto)
+                    valor_nuevo = int(texto)
                     # Buscar nodo existente o crear uno temporal
                     nodo_existente = next((n for n in getattr(self.proyecto, "nodos", []) 
-                                        if self._obtener_id_nodo(n) == nuevo_id), None)
+                                        if self._obtener_id_nodo(n) == valor_nuevo), None)
                     if nodo_existente:
                         ruta_dict["destino"] = nodo_existente
                     else:
                         # Crear nodo temporal (será normalizado después)
-                        ruta_dict["destino"] = {"id": nuevo_id, "X": 0, "Y": 0}
+                        ruta_dict["destino"] = {"id": valor_nuevo, "X": 0, "Y": 0}
                 except ValueError:
                     print(f"Error: ID de destino debe ser un número entero")
+                    return
                     
             elif campo == "visita":
                 try:
@@ -2077,11 +2485,13 @@ class EditorController(QObject):
                     
                     ids_texto = [id_str.strip() for id_str in texto.split(',')] if texto else []
                     nueva_visita = []
+                    valor_nuevo = []
                     
                     for id_str in ids_texto:
                         if id_str:  # Ignorar strings vacíos
                             try:
                                 nodo_id = int(id_str)
+                                valor_nuevo.append(nodo_id)
                                 # Buscar nodo existente
                                 nodo_existente = next((n for n in getattr(self.proyecto, "nodos", []) 
                                                     if self._obtener_id_nodo(n) == nodo_id), None)
@@ -2094,9 +2504,19 @@ class EditorController(QObject):
                                 print(f"Error: ID de visita debe ser número entero: {id_str}")
                     
                     ruta_dict["visita"] = nueva_visita
+                    valor_nuevo = str(valor_nuevo)  # Guardar como string para historial
                     
                 except Exception as e:
                     print(f"Error procesando lista de visita: {e}")
+
+            # Registrar cambio en historial
+            if valor_anterior is not None and valor_nuevo is not None and valor_anterior != valor_nuevo:
+                self.registrar_cambio_propiedad_ruta(
+                    self.ruta_actual_idx,
+                    campo,
+                    str(valor_anterior) if valor_anterior is not None else "",
+                    str(valor_nuevo) if valor_nuevo is not None else ""
+                )
 
             # Normalizar y actualizar referencia en proyecto.rutas usando el método del proyecto
             self._normalize_route_nodes(ruta_dict)
@@ -2248,9 +2668,19 @@ class EditorController(QObject):
             return
 
         texto = item.text()
+        
+        # Obtener el valor anterior ANTES de cambiarlo
+        valor_anterior = None
+        if hasattr(nodo, 'get'):
+            valor_anterior = nodo.get(clave)
+        elif hasattr(nodo, clave):
+            valor_anterior = getattr(nodo, clave)
+        
         try:
+            # Intentar evaluar el valor (para números, listas, etc.)
             valor = ast.literal_eval(texto)
         except Exception:
+            # Si falla, usar el texto como string
             valor = texto
 
         try:
@@ -2258,26 +2688,46 @@ class EditorController(QObject):
             if clave in ["X", "Y"]:
                 try:
                     valor_metros = float(valor)
-                    valor = self.metros_a_pixeles(valor_metros)
+                    valor_pixeles = self.metros_a_pixeles(valor_metros)
+                    
+                    # Registrar en historial (en metros para el usuario)
+                    if valor_anterior is not None:
+                        valor_anterior_metros = self.pixeles_a_metros(valor_anterior)
+                        self.registrar_cambio_propiedad_nodo(
+                            nodo.get('id'), 
+                            clave, 
+                            valor_anterior_metros, 
+                            valor_metros
+                        )
+                    
+                    # Actualizar usando el proyecto (emitirá señal)
+                    self.proyecto.actualizar_nodo({
+                        "id": nodo.get('id'),
+                        clave: valor_pixeles
+                    })
+                    
                 except ValueError:
                     print(f"Error: Valor de {clave} debe ser un número")
                     return
-
-            # Usar el método del proyecto para actualizar (esto emitirá la señal)
-            self.proyecto.actualizar_nodo({clave: valor, "id": nodo.get('id')})
-            
-            # Si la clave es 'objetivo' o 'es_cargador', actualizar visualización del nodo
-            if clave in ["objetivo", "es_cargador"]:
-                for item in self.scene.items():
-                    if isinstance(item, NodoItem):
-                        if item.nodo.get('id') == nodo.get('id'):
-                            item.actualizar_objetivo()
-                            break
+            else:
+                # Para otras propiedades
+                if valor_anterior is not None and valor_anterior != valor:
+                    self.registrar_cambio_propiedad_nodo(
+                        nodo.get('id'), 
+                        clave, 
+                        valor_anterior, 
+                        valor
+                    )
+                
+                # Actualizar usando el proyecto (emitirá señal)
+                self.proyecto.actualizar_nodo({
+                    "id": nodo.get('id'),
+                    clave: valor
+                })
                 
         except Exception as err:
             print("Error actualizando nodo en el modelo:", err)
-            return
-        
+            
 
     # --- Eliminar nodo con reconfiguración de rutas ---
     def eliminar_nodo(self, nodo, nodo_item):
@@ -4337,8 +4787,17 @@ class EditorController(QObject):
         # Actualizar NodoItem visual si existe
         for item in self.scene.items():
             if isinstance(item, NodoItem) and item.nodo.get('id') == nodo.get('id'):
+                # Actualizar objetivo (puede afectar icono)
                 item.actualizar_objetivo()
-                item.actualizar_posicion()
+                
+                # Actualizar posición si cambió X o Y
+                if "X" in nodo or "Y" in nodo:
+                    item.actualizar_posicion()
+                
+                # Forzar repintado para cualquier propiedad (incluyendo ángulo "A")
+                item.update()
+                
+                print(f"✓ NodoItem actualizado visualmente para nodo {nodo.get('id')}")
                 break
     
     def _on_ruta_agregada(self, ruta):
@@ -4388,13 +4847,17 @@ class EditorController(QObject):
         """Actualiza todas las referencias al proyecto en controladores y subcontroladores"""
         self.proyecto = proyecto
         
+        # Reconectar señales del proyecto
+        self._conectar_señales_proyecto()
+        
         # Actualizar en subcontroladores
         self.mover_ctrl.proyecto = proyecto
         self.colocar_ctrl.proyecto = proyecto
         self.ruta_ctrl.proyecto = proyecto
         
-        # Reconectar señales del nuevo proyecto
-        self._conectar_señales_proyecto()
+        # IMPORTANTE: Resetear el estado de los subcontroladores
+        if self.modo_actual:
+            self._resetear_modo_actual()
         
         print("✓ Referencias del proyecto actualizadas en todos los controladores")
 
