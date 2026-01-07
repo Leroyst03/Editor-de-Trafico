@@ -6,7 +6,7 @@ import os
 
 class NodoItem(QGraphicsObject):
     # Escala única para TODOS los iconos respecto al tamaño del nodo
-    ICON_SCALE = 1.8
+    ICON_SCALE = 1.5
     
     # CACHE ESTÁTICO - Programación dinámica: cada icono se procesa UNA sola vez
     # Estructura: { (target_size, nombre_icono, ruta_completa): QPixmap }
@@ -427,15 +427,6 @@ class NodoItem(QGraphicsObject):
         self._determinar_visualizacion()
         self.update()
 
-    def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.LeftButton and self.editor:
-            # Seleccionar este nodo primero
-            self.setSelected(True)
-            # Llamar al método del editor que ahora incluye confirmación
-            self.editor.eliminar_nodo_seleccionado()
-            event.accept()
-        else:
-            super().mouseDoubleClickEvent(event)
 
     def mousePressEvent(self, event):
         print(f"MousePress en nodo {self.nodo.get('id')}")

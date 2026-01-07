@@ -125,10 +125,6 @@ class RutaController(QObject):
                 pass
             return
 
-        # Evitar duplicados consecutivos
-        if self._nodes_seq and self._nodes_seq[-1].get("id") == nodo.get("id"):
-            return
-
         # Dibujar línea entre last_item y nodo_item
         p1 = self._last_item.scenePos()
         p2 = nodo_item.scenePos()

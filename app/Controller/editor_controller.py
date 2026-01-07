@@ -264,15 +264,21 @@ class EditorController(QObject):
                     print("MODO MOVER: ArrowCursor (no sobre nodo)")
                     
             elif self.modo_actual == "colocar":
-                # MODO COLOCAR VÉRTICE
+                # MODO COLOCAR VÉRTICE - SIEMPRE flecha
                 cursor = Qt.ArrowCursor
                 print("MODO COLOCAR: ArrowCursor")
                 
             elif self.modo_actual == "ruta":
-                # MODO RUTA
-                cursor = Qt.ArrowCursor
-                print("MODO RUTA: ArrowCursor")
-                
+                # MODO RUTA - AHORA IGUAL QUE MODO MOVER (sin arrastre)
+                if self._cursor_sobre_nodo:
+                    # PointingHandCursor cuando está sobre un nodo
+                    cursor = Qt.PointingHandCursor
+                    print("MODO RUTA: PointingHandCursor (sobre nodo)")
+                else:
+                    # Flecha cuando no está sobre un nodo
+                    cursor = Qt.ArrowCursor
+                    print("MODO RUTA: ArrowCursor (no sobre nodo)")
+                    
             else:
                 # Cualquier otro modo
                 cursor = Qt.ArrowCursor
@@ -605,22 +611,9 @@ class EditorController(QObject):
     
     def cancelar_ruta_actual(self):
         """Cancela la creación de la ruta actual cuando se presiona Escape"""
+        # En lugar de código específico para ruta, llamamos al método general
         if self.modo_actual == "ruta":
-            try:
-                # Cancelar la ruta primero
-                self.ruta_ctrl.cancelar_ruta_actual()
-                print("✓ Ruta cancelada con Escape")
-                
-                # Desactivar el botón de ruta
-                self.view.crear_ruta_button.setChecked(False)
-                # Y llamar a cambiar_modo para limpiar todo
-                self.cambiar_modo(self.view.crear_ruta_button)
-                
-                # --- NUEVO: Actualizar descripción al volver a modo navegación ---
-                self.actualizar_descripcion_modo("navegacion")
-                
-            except Exception as e:
-                print(f"Error al cancelar ruta: {e}")
+            self.cancelar_modo_actual()
         else:
             print("⚠ No estás en modo Ruta")
     
@@ -704,9 +697,9 @@ class EditorController(QObject):
             elif event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
                 self.finalizar_ruta_actual()
                 event.accept()
-            # Escape para cancelar ruta
+            # Escape para cancelar cualquier modo activo y volver a navegación
             elif event.key() == Qt.Key_Escape:
-                self.cancelar_ruta_actual()
+                self.cancelar_modo_actual()
                 event.accept()
             else:
                 event.ignore()
@@ -714,8 +707,67 @@ class EditorController(QObject):
             print(f"Error en keyPressEvent: {e}")
             event.ignore()
 
+    def cancelar_modo_actual(self):
+        """
+        Cancela cualquier modo activo y regresa al modo navegación.
+        Se llama cuando se presiona la tecla Escape.
+        """
+        try:
+            print(f"Cancelando modo actual: {self.modo_actual}")
+            
+            # Si ya estamos en modo navegación (None), no hacer nada
+            if self.modo_actual is None:
+                print("Ya estamos en modo navegación")
+                return
+            
+            # Determinar qué botón está activo basado en el modo actual
+            boton_activo = None
+            
+            if self.modo_actual == "mover":
+                boton_activo = self.view.mover_button
+                print("Cancelando modo Mover")
+            
+            elif self.modo_actual == "colocar":
+                boton_activo = self.view.colocar_vertice_button
+                print("Cancelando modo Colocar")
+                
+                # IMPORTANTE: Cancelar cualquier acción pendiente en modo colocar
+                try:
+                    self.colocar_ctrl.desactivar()
+                except Exception as e:
+                    print(f"Error al desactivar modo colocar: {e}")
+            
+            elif self.modo_actual == "ruta":
+                boton_activo = self.view.crear_ruta_button
+                print("Cancelando modo Ruta")
+                
+                # IMPORTANTE: Cancelar la ruta actual primero
+                try:
+                    self.ruta_ctrl.cancelar_ruta_actual()
+                except Exception as e:
+                    print(f"Error al cancelar ruta: {e}")
+            
+            # Desactivar el botón y cambiar al modo navegación
+            if boton_activo and boton_activo.isChecked():
+                print(f"Desactivando botón: {boton_activo.text()}")
+                boton_activo.setChecked(False)
+                
+                # Llamar a cambiar_modo para realizar la desactivación completa
+                self.cambiar_modo(boton_activo)
+            
+            # Forzar actualización del cursor
+            self._actualizar_cursor()
+            
+            # Mostrar mensaje de confirmación
+            print(f"✓ Modo cancelado. Regresando a navegación")
+            
+            # Actualizar descripción del modo
+            self.actualizar_descripcion_modo("navegacion")
+            
+        except Exception as e:
+            print(f"Error al cancelar modo actual: {e}")
+
     # --- SISTEMA DE DESHACER/REHACER (UNDO/REDO) ---
-    
     # --- MÉTODOS PARA REGISTRAR CAMBIOS DE PROPIEDADES ---
     def registrar_cambio_propiedad_nodo(self, nodo_id, propiedad, valor_anterior, valor_nuevo):
         """
@@ -1679,6 +1731,13 @@ class EditorController(QObject):
             nodo_item.moved.connect(self.on_nodo_moved)
         except Exception:
             pass
+        
+        # CONEXIÓN DE SEÑALES HOVER
+        try:
+            nodo_item.hover_entered.connect(self.nodo_hover_entered)
+            nodo_item.hover_leaved.connect(self.nodo_hover_leaved)
+        except Exception as e:
+            print(f"Error conectando señales hover: {e}")
 
         # Añadir a la escena y devolver
         try:
@@ -2326,6 +2385,30 @@ class EditorController(QObject):
         except Exception:
             pass
 
+    def _obtener_ruta_completa(self, ruta_dict):
+        """Obtiene todos los IDs de la ruta en orden: origen, visitas, destino"""
+        # Obtener IDs
+        origen_id = self._obtener_id_nodo(ruta_dict.get("origen"))
+        destino_id = self._obtener_id_nodo(ruta_dict.get("destino"))
+        
+        # Obtener IDs de visita
+        ids_visita = []
+        for nodo in ruta_dict.get("visita", []):
+            nodo_id = self._obtener_id_nodo(nodo)
+            if nodo_id:
+                ids_visita.append(nodo_id)
+        
+        # Combinar en orden
+        ruta_completa = []
+        if origen_id:
+            ruta_completa.append(origen_id)
+        ruta_completa.extend(ids_visita)
+        if destino_id:
+            ruta_completa.append(destino_id)
+        
+        # Formatear como string
+        return f"[{', '.join(str(id) for id in ruta_completa)}]"
+
     def mostrar_propiedades_ruta(self, ruta):
         """
         Muestra la ruta en propertiesTable con el formato:
@@ -2333,6 +2416,7 @@ class EditorController(QObject):
         Origen: id_origen
         Destino: id_destino  
         visita: [id1, id2, id3]
+        Ruta completa: [id_origen, id1, id2, id3, id_destino]
         """
         if not ruta:
             return
@@ -2354,12 +2438,13 @@ class EditorController(QObject):
         self.view.propertiesTable.setColumnCount(2)
         self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
 
-        # Mostrar nombre, origen, destino y visita
+        # Mostrar propiedades usando la función auxiliar
         propiedades = [
             ("Nombre", ruta_dict.get("nombre", "Ruta")),
             ("Origen", self._obtener_id_nodo(ruta_dict.get("origen"))),
             ("Destino", self._obtener_id_nodo(ruta_dict.get("destino"))),
-            ("visita", self._obtener_ids_visita(ruta_dict.get("visita", [])))
+            ("visita", self._obtener_ids_visita(ruta_dict.get("visita", []))),
+            ("Ruta completa", self._obtener_ruta_completa(ruta_dict))
         ]
 
         self.view.propertiesTable.setRowCount(len(propiedades))
@@ -3721,8 +3806,9 @@ class EditorController(QObject):
 
     # --- Event filter para deselección al clicar en fondo ---
     def eventFilter(self, obj, event):
-        # Detectar teclas presionadas
+       # Detectar teclas presionadas
         if event.type() == QEvent.KeyPress:
+            # Pasar el evento a keyPressEvent para manejo centralizado
             self.keyPressEvent(event)
             return True
         
@@ -3753,14 +3839,13 @@ class EditorController(QObject):
             pos = self.view.marco_trabajo.mapToScene(event.pos())
             
             # PRIMERO: Si estamos en modo ruta o modo colocar, NO manejar el clic aquí
+            # Los controladores respectivos manejarán los clics a través de su eventFilter
             if self.modo_actual in ["ruta", "colocar"]:
-                return False
+                return False  # Dejar que el controlador respectivo maneje el clic
             
-            # Verificar si hay nodos en la posición del clic
+            # SEGUNDO: Comportamiento normal (solo si NO estamos en modo ruta o colocar)
             items = self.scene.items(pos)
-            hay_nodo = any(isinstance(it, NodoItem) for it in items)
-            
-            if not hay_nodo:
+            if not any(isinstance(it, NodoItem) for it in items):
                 # Click fuera de nodo
                 print("CLICK FUERA DE NODO - Forzar estado normal")
                 
@@ -3792,7 +3877,7 @@ class EditorController(QObject):
                     if hasattr(self.view, "rutasList"):
                         self.view.rutasList.clearSelection()
                 except Exception:
-                    pass
+                        pass
                 
                 self._clear_highlight_lines()
                 
