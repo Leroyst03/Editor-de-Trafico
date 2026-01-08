@@ -2386,28 +2386,24 @@ class EditorController(QObject):
             pass
 
     def _obtener_ruta_completa(self, ruta_dict):
-        """Obtiene todos los IDs de la ruta en orden: origen, visitas, destino"""
-        # Obtener IDs
-        origen_id = self._obtener_id_nodo(ruta_dict.get("origen"))
-        destino_id = self._obtener_id_nodo(ruta_dict.get("destino"))
+        """Obtiene todos los nodos de la ruta en orden: origen, visitas, destino"""
+        nodos = []
         
-        # Obtener IDs de visita
-        ids_visita = []
-        for nodo in ruta_dict.get("visita", []):
-            nodo_id = self._obtener_id_nodo(nodo)
-            if nodo_id:
-                ids_visita.append(nodo_id)
+        # Origen
+        origen = ruta_dict.get("origen")
+        if origen:
+            nodos.append(origen)
         
-        # Combinar en orden
-        ruta_completa = []
-        if origen_id:
-            ruta_completa.append(origen_id)
-        ruta_completa.extend(ids_visita)
-        if destino_id:
-            ruta_completa.append(destino_id)
+        # Visita
+        visita = ruta_dict.get("visita", [])
+        nodos.extend(visita)
         
-        # Formatear como string
-        return f"[{', '.join(str(id) for id in ruta_completa)}]"
+        # Destino
+        destino = ruta_dict.get("destino")
+        if destino:
+            nodos.append(destino)
+        
+        return nodos
 
     def mostrar_propiedades_ruta(self, ruta):
         """
@@ -2415,7 +2411,6 @@ class EditorController(QObject):
         Nombre: nombre_ruta
         Origen: id_origen
         Destino: id_destino  
-        visita: [id1, id2, id3]
         Ruta completa: [id_origen, id1, id2, id3, id_destino]
         """
         if not ruta:
@@ -2438,13 +2433,20 @@ class EditorController(QObject):
         self.view.propertiesTable.setColumnCount(2)
         self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
 
-        # Mostrar propiedades usando la función auxiliar
+        # Obtener IDs de la ruta completa
+        ruta_completa_ids = self._obtener_ids_ruta_completa(ruta_dict)
+        ruta_completa_str = f"[{', '.join(str(id) for id in ruta_completa_ids)}]"
+        
+        # Obtener origen y destino actuales
+        origen_id = self._obtener_id_nodo(ruta_dict.get("origen"))
+        destino_id = self._obtener_id_nodo(ruta_dict.get("destino"))
+        
+        # Mostrar propiedades
         propiedades = [
             ("Nombre", ruta_dict.get("nombre", "Ruta")),
-            ("Origen", self._obtener_id_nodo(ruta_dict.get("origen"))),
-            ("Destino", self._obtener_id_nodo(ruta_dict.get("destino"))),
-            ("visita", self._obtener_ids_visita(ruta_dict.get("visita", []))),
-            ("Ruta completa", self._obtener_ruta_completa(ruta_dict))
+            ("Origen", origen_id),
+            ("Destino", destino_id),
+            ("Ruta completa", ruta_completa_str)
         ]
 
         self.view.propertiesTable.setRowCount(len(propiedades))
@@ -2484,6 +2486,80 @@ class EditorController(QObject):
             ids.append(self._obtener_id_nodo(nodo))
         return f"[{', '.join(str(id) for id in ids)}]"
 
+    def _obtener_ids_ruta_completa(self, ruta_dict):
+        """Devuelve una lista de IDs de la ruta completa (origen + visita + destino)"""
+        ids = []
+        
+        # Origen
+        origen = ruta_dict.get("origen")
+        if origen:
+            origen_id = self._obtener_id_nodo(origen)
+            if origen_id:
+                ids.append(origen_id)
+        
+        # Visita (nodos intermedios)
+        visita = ruta_dict.get("visita", [])
+        for nodo_visita in visita:
+            nodo_id = self._obtener_id_nodo(nodo_visita)
+            if nodo_id:
+                ids.append(nodo_id)
+        
+        # Destino
+        destino = ruta_dict.get("destino")
+        if destino:
+            destino_id = self._obtener_id_nodo(destino)
+            if destino_id and (not ids or destino_id != ids[0]):  # No agregar si es igual al origen
+                ids.append(destino_id)
+        
+        return ids
+
+    def _actualizar_ruta_desde_ids(self, ruta_dict, ids_ruta):
+        """
+        Actualiza la estructura de ruta (origen, visita, destino) a partir de una lista de IDs.
+        Mantiene compatibilidad con la estructura existente.
+        """
+        if not ids_ruta:
+            ruta_dict["origen"] = None
+            ruta_dict["destino"] = None
+            ruta_dict["visita"] = []
+            return
+        
+        # Primer elemento es el origen
+        primer_id = ids_ruta[0]
+        nodo_existente = next((n for n in self.proyecto.nodos 
+                            if self._obtener_id_nodo(n) == primer_id), None)
+        if nodo_existente:
+            ruta_dict["origen"] = nodo_existente
+        else:
+            ruta_dict["origen"] = {"id": primer_id, "X": 0, "Y": 0}
+        
+        # Último elemento es el destino (si hay más de un elemento)
+        if len(ids_ruta) > 1:
+            ultimo_id = ids_ruta[-1]
+            nodo_existente = next((n for n in self.proyecto.nodos 
+                                if self._obtener_id_nodo(n) == ultimo_id), None)
+            if nodo_existente:
+                ruta_dict["destino"] = nodo_existente
+            else:
+                ruta_dict["destino"] = {"id": ultimo_id, "X": 0, "Y": 0}
+        else:
+            # Si solo hay un elemento, el destino es el mismo que el origen
+            ruta_dict["destino"] = ruta_dict["origen"]
+        
+        # Elementos intermedios son la visita
+        if len(ids_ruta) > 2:
+            nueva_visita = []
+            for id_intermedio in ids_ruta[1:-1]:
+                nodo_existente = next((n for n in self.proyecto.nodos 
+                                    if self._obtener_id_nodo(n) == id_intermedio), None)
+                if nodo_existente:
+                    nueva_visita.append(nodo_existente)
+                else:
+                    nueva_visita.append({"id": id_intermedio, "X": 0, "Y": 0})
+            ruta_dict["visita"] = nueva_visita
+        else:
+            ruta_dict["visita"] = []
+            
     def _actualizar_propiedad_ruta(self, item):
         """Actualiza la ruta a través del proyecto para notificar cambios"""
         if item.column() != 1:
@@ -2522,8 +2598,10 @@ class EditorController(QObject):
                 valor_anterior = self._obtener_id_nodo(ruta_dict.get("origen"))
             elif campo == "destino":
                 valor_anterior = self._obtener_id_nodo(ruta_dict.get("destino"))
-            elif campo == "visita":
-                valor_anterior = self._obtener_ids_visita(ruta_dict.get("visita", []))
+            elif campo == "ruta completa":
+                # Obtener la ruta completa actual como string
+                ruta_completa_ids = self._obtener_ids_ruta_completa(ruta_dict)
+                valor_anterior = f"[{', '.join(str(id) for id in ruta_completa_ids)}]"
             
             print(f"Actualizando ruta - Campo: {campo}, Valor: {texto}")
             
@@ -2532,67 +2610,75 @@ class EditorController(QObject):
             if campo == "nombre":
                 valor_nuevo = texto
                 ruta_dict["nombre"] = texto
+                
             elif campo == "origen":
                 try:
-                    valor_nuevo = int(texto)
-                    # Buscar nodo existente o crear uno temporal
-                    nodo_existente = next((n for n in getattr(self.proyecto, "nodos", []) 
-                                        if self._obtener_id_nodo(n) == valor_nuevo), None)
-                    if nodo_existente:
-                        ruta_dict["origen"] = nodo_existente
+                    nuevo_origen_id = int(texto)
+                    # Obtener la ruta completa actual
+                    ruta_completa_ids = self._obtener_ids_ruta_completa(ruta_dict)
+                    
+                    if ruta_completa_ids:
+                        # Actualizar solo el primer elemento
+                        ruta_completa_ids[0] = nuevo_origen_id
                     else:
-                        # Crear nodo temporal (será normalizado después)
-                        ruta_dict["origen"] = {"id": valor_nuevo, "X": 0, "Y": 0}
+                        # Si no hay ruta, crear una nueva
+                        ruta_completa_ids = [nuevo_origen_id]
+                    
+                    # Reconstruir ruta a partir de la lista de IDs
+                    self._actualizar_ruta_desde_ids(ruta_dict, ruta_completa_ids)
+                    valor_nuevo = nuevo_origen_id
                 except ValueError:
                     print(f"Error: ID de origen debe ser un número entero")
                     return
                     
             elif campo == "destino":
                 try:
-                    valor_nuevo = int(texto)
-                    # Buscar nodo existente o crear uno temporal
-                    nodo_existente = next((n for n in getattr(self.proyecto, "nodos", []) 
-                                        if self._obtener_id_nodo(n) == valor_nuevo), None)
-                    if nodo_existente:
-                        ruta_dict["destino"] = nodo_existente
+                    nuevo_destino_id = int(texto)
+                    # Obtener la ruta completa actual
+                    ruta_completa_ids = self._obtener_ids_ruta_completa(ruta_dict)
+                    
+                    if ruta_completa_ids:
+                        # Actualizar solo el último elemento
+                        if len(ruta_completa_ids) > 1:
+                            ruta_completa_ids[-1] = nuevo_destino_id
+                        else:
+                            # Si solo hay un elemento, agregar el destino
+                            ruta_completa_ids.append(nuevo_destino_id)
                     else:
-                        # Crear nodo temporal (será normalizado después)
-                        ruta_dict["destino"] = {"id": valor_nuevo, "X": 0, "Y": 0}
+                        # Si no hay ruta, crear una nueva
+                        ruta_completa_ids = [nuevo_destino_id]
+                    
+                    # Reconstruir ruta a partir de la lista de IDs
+                    self._actualizar_ruta_desde_ids(ruta_dict, ruta_completa_ids)
+                    valor_nuevo = nuevo_destino_id
                 except ValueError:
                     print(f"Error: ID de destino debe ser un número entero")
                     return
                     
-            elif campo == "visita":
+            elif campo == "ruta completa":
                 try:
                     # Parsear lista de IDs: [1, 2, 3] o 1, 2, 3
                     if texto.startswith('[') and texto.endswith(']'):
                         texto = texto[1:-1]
                     
                     ids_texto = [id_str.strip() for id_str in texto.split(',')] if texto else []
-                    nueva_visita = []
-                    valor_nuevo = []
+                    nueva_ruta_completa = []
                     
                     for id_str in ids_texto:
                         if id_str:  # Ignorar strings vacíos
                             try:
                                 nodo_id = int(id_str)
-                                valor_nuevo.append(nodo_id)
-                                # Buscar nodo existente
-                                nodo_existente = next((n for n in getattr(self.proyecto, "nodos", []) 
-                                                    if self._obtener_id_nodo(n) == nodo_id), None)
-                                if nodo_existente:
-                                    nueva_visita.append(nodo_existente)
-                                else:
-                                    # Crear nodo temporal
-                                    nueva_visita.append({"id": nodo_id, "X": 0, "Y": 0})
+                                nueva_ruta_completa.append(nodo_id)
                             except ValueError:
-                                print(f"Error: ID de visita debe ser número entero: {id_str}")
+                                print(f"Error: ID de ruta debe ser número entero: {id_str}")
                     
-                    ruta_dict["visita"] = nueva_visita
-                    valor_nuevo = str(valor_nuevo)  # Guardar como string para historial
+                    # Reconstruir ruta a partir de la lista de IDs
+                    self._actualizar_ruta_desde_ids(ruta_dict, nueva_ruta_completa)
+                    valor_nuevo = f"[{', '.join(str(id) for id in nueva_ruta_completa)}]"
                     
                 except Exception as e:
-                    print(f"Error procesando lista de visita: {e}")
+                    print(f"Error procesando ruta completa: {e}")
+                    return
 
             # Registrar cambio en historial
             if valor_anterior is not None and valor_nuevo is not None and valor_anterior != valor_nuevo:
@@ -2609,6 +2695,13 @@ class EditorController(QObject):
             
             # Actualizar el texto en la lista lateral de rutas
             self._actualizar_widget_ruta_en_lista(self.ruta_actual_idx)
+            
+            # Redibujar rutas
+            self._dibujar_rutas()
+            
+            # Actualizar la tabla de propiedades para mostrar cambios
+            if self.ruta_actual_idx == self.ruta_actual_idx:
+                self.mostrar_propiedades_ruta(ruta_dict)
             
             print(f"Ruta actualizada exitosamente")
             
