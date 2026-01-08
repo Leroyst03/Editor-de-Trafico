@@ -814,6 +814,167 @@ class EditorController(QObject):
         except Exception as e:
             print(f"Error registrando cambio de propiedad de nodo: {e}")
 
+    def _registrar_creacion_nodo(self, nodo):
+        """
+        Registra la creación de un nodo en el historial UNDO/REDO.
+        
+        Args:
+            nodo: El nodo creado (con ID, X, Y, objetivo, es_cargador, etc.)
+        """
+        if self._ejecutando_deshacer_rehacer:
+            return
+        
+        try:
+            # Si estamos en medio del historial (por deshacer previo), eliminar movimientos futuros
+            if self.indice_historial < len(self.historial_movimientos) - 1:
+                self.historial_movimientos = self.historial_movimientos[:self.indice_historial + 1]
+            
+            # Crear entrada del historial
+            creacion = {
+                'tipo': 'creacion',
+                'nodo': copy.deepcopy(nodo),
+                'descripcion': f"Creación de nodo ID {nodo.get('id')}"
+            }
+            
+            # Agregar al historial
+            self.historial_movimientos.append(creacion)
+            
+            # Limitar tamaño del historial
+            if len(self.historial_movimientos) > self.max_historial:
+                self.historial_movimientos.pop(0)
+            
+            # Actualizar el índice al nuevo elemento
+            self.indice_historial = len(self.historial_movimientos) - 1
+            
+            print(f"✓ Creación registrada en historial: Nodo ID {nodo.get('id')}")
+            print(f"  Índice actual: {self.indice_historial}, Historial total: {len(self.historial_movimientos)}")
+            
+        except Exception as e:
+            print(f"Error registrando creación de nodo: {e}")
+
+    # --- MÉTODOS PARA DESHACER/REHACER CREACIÓN DE NODOS ---
+    def _deshacer_creacion_nodo(self, accion):
+        """Deshace la creación de un nodo (es decir, lo elimina)"""
+        try:
+            self._ejecutando_deshacer_rehacer = True
+            
+            nodo = accion['nodo']
+            nodo_id = nodo.get('id')
+            
+            print(f"Deshaciendo creación: Nodo ID {nodo_id}")
+            
+            # ANTES de eliminar: verificar si está en la secuencia de ruta
+            en_secuencia_ruta = False
+            if hasattr(self, 'ruta_ctrl') and self.ruta_ctrl.activo:
+                en_secuencia_ruta = self.ruta_ctrl.contiene_nodo_en_secuencia(nodo_id)
+                print(f"  Nodo en secuencia de ruta: {en_secuencia_ruta}")
+            
+            # Buscar el nodo en la escena y en el proyecto
+            nodo_item_a_eliminar = None
+            nodo_en_proyecto = None
+            
+            # Buscar en la escena
+            for item in self.scene.items():
+                if isinstance(item, NodoItem) and item.nodo.get('id') == nodo_id:
+                    nodo_item_a_eliminar = item
+                    nodo_en_proyecto = item.nodo
+                    break
+            
+            # Si no está en la escena, buscar en el proyecto
+            if not nodo_en_proyecto:
+                for n in self.proyecto.nodos:
+                    if n.get('id') == nodo_id:
+                        nodo_en_proyecto = n
+                        break
+            
+            # Eliminar el nodo (sin registrar en historial)
+            if nodo_en_proyecto:
+                # Usar eliminación sin historial
+                self._eliminar_nodo_sin_historial(nodo_en_proyecto, nodo_item_a_eliminar)
+            
+            # DESPUÉS de eliminar: si estaba en secuencia de ruta, actualizar
+            if en_secuencia_ruta:
+                print(f"  Actualizando secuencia de ruta después de eliminar nodo {nodo_id}")
+                self.ruta_ctrl.remover_nodo_de_secuencia(nodo_id)
+                
+                # Si después de remover no quedan nodos, limpiar estado
+                if not self.ruta_ctrl._nodes_seq:
+                    print("  ✓ Secuencia de ruta vaciada completamente")
+                    # Restaurar colores de todos los nodos
+                    self.restaurar_colores_nodos()
+            
+            # Decrementar índice del historial
+            self.indice_historial -= 1
+            
+            print(f"✓ Creación deshecha: Nodo ID {nodo_id} eliminado")
+            
+        except Exception as e:
+            print(f"Error deshaciendo creación de nodo: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self._ejecutando_deshacer_rehacer = False
+
+    def _rehacer_creacion_nodo(self, accion):
+        """Rehace la creación de un nodo (es decir, lo vuelve a crear)"""
+        try:
+            self._ejecutando_deshacer_rehacer = True
+            
+            nodo = accion['nodo']
+            nodo_id = nodo.get('id')
+            x = nodo.get('X')
+            y = nodo.get('Y')
+            objetivo = nodo.get('objetivo', 0)
+            es_cargador = nodo.get('es_cargador', 0)
+            angulo = nodo.get('A', 0)
+            
+            print(f"Rehaciendo creación: Nodo ID {nodo_id} en ({x}, {y})")
+            
+            # Verificar si el nodo ya existe (no debería, pero por seguridad)
+            nodo_existente = None
+            for n in self.proyecto.nodos:
+                if n.get('id') == nodo_id:
+                    nodo_existente = n
+                    break
+            
+            if nodo_existente:
+                print(f"Nodo ID {nodo_id} ya existe, no es necesario recrearlo")
+            else:
+                # Crear nuevo nodo en el proyecto (sin registrar en historial)
+                nuevo_nodo = {
+                    "id": nodo_id,
+                    "X": x,
+                    "Y": y,
+                    "objetivo": objetivo,
+                    "es_cargador": es_cargador,
+                    "A": angulo
+                }
+                self.proyecto.nodos.append(nuevo_nodo)
+                
+                # Crear NodoItem visual
+                nodo_item = self._create_nodo_item(nuevo_nodo)
+                
+                # Inicializar visibilidad
+                self._inicializar_nodo_visibilidad(nuevo_nodo, agregar_a_lista=True)
+                
+                # Actualizar lista de nodos
+                self._actualizar_lista_nodos_con_widgets()
+                
+                # Redibujar rutas si es necesario
+                self._dibujar_rutas()
+                
+                print(f"✓ Creación rehecha: Nodo ID {nodo_id} recreado")
+            
+            # IMPORTANTE: No necesitamos agregar a secuencia de ruta automáticamente
+            # porque el usuario debe decidir si quiere añadirlo nuevamente a la ruta
+            
+        except Exception as e:
+            print(f"Error rehaciendo creación de nodo: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self._ejecutando_deshacer_rehacer = False
+
     def registrar_cambio_propiedad_ruta(self, ruta_idx, propiedad, valor_anterior, valor_nuevo):
         """
         Registra un cambio de propiedad de una ruta en el historial UNDO/REDO.
@@ -1251,6 +1412,8 @@ class EditorController(QObject):
                 self._deshacer_cambio_propiedad_nodo(accion)
             elif tipo == 'cambio_propiedad_ruta':
                 self._deshacer_cambio_propiedad_ruta(accion)
+            elif tipo == 'creacion':
+                self._deshacer_creacion_nodo(accion)  # NUEVO
             else:
                 # Acción de movimiento (comportamiento original)
                 self._deshacer_movimiento_original(accion)
@@ -1371,7 +1534,7 @@ class EditorController(QObject):
     def _eliminar_nodo_sin_historial(self, nodo, nodo_item):
         """
         Elimina un nodo sin registrar en el historial UNDO/REDO.
-        Usado para rehacer eliminaciones.
+        Usado para rehacer eliminaciones y para deshacer creaciones.
         """
         try:
             nodo_id = nodo.get("id")
@@ -1399,7 +1562,6 @@ class EditorController(QObject):
             self._reconfigurar_rutas_por_eliminacion(nodo_id)
             
             # 5) IMPORTANTE: Reconstruir relaciones de TODAS las rutas después de la eliminación
-            # Esta es la parte crítica que faltaba
             self._actualizar_todas_relaciones_nodo_ruta()
             
             # 6) Actualizar UI
@@ -1407,7 +1569,7 @@ class EditorController(QObject):
             self._dibujar_rutas()
             self._actualizar_lista_rutas_con_widgets()
             
-            print(f"✓ Nodo ID {nodo_id} reeliminado")
+            print(f"✓ Nodo ID {nodo_id} reeliminado (sin historial)")
             
         except Exception as e:
             print(f"Error en eliminación sin historial: {e}")
@@ -1530,6 +1692,8 @@ class EditorController(QObject):
                 self._rehacer_cambio_propiedad_nodo(accion)
             elif tipo == 'cambio_propiedad_ruta':
                 self._rehacer_cambio_propiedad_ruta(accion)
+            elif tipo == 'creacion':
+                self._rehacer_creacion_nodo(accion)  # NUEVO
             else:
                 # Acción de movimiento (comportamiento original)
                 self._rehacer_movimiento_original(accion)
@@ -1747,10 +1911,20 @@ class EditorController(QObject):
 
         return nodo_item
 
-    def crear_nodo(self, x=100, y=100):
+    def crear_nodo(self, x=100, y=100, registrar_historial=True):
+        """
+        Crea un nuevo nodo en las coordenadas especificadas.
+        
+        Args:
+            x, y: Coordenadas en píxeles
+            registrar_historial: Si True, registra la creación en el historial UNDO/REDO
+            
+        Returns:
+            NodoItem: El nodo visual creado (o None si falló)
+        """
         if not self.proyecto:
             print("No hay proyecto cargado")
-            return
+            return None
 
         try:
             print(f"DEBUG crear_nodo: Creando nodo en ({x}, {y}) píxeles")
@@ -1787,6 +1961,7 @@ class EditorController(QObject):
                     nodo_item.moved.connect(self.on_nodo_moved)
                 except Exception as e2:
                     print(f"DEBUG crear_nodo: Error al configurar NodoItem: {e2}")
+                    return None
 
             # --- NUEVA FUNCIÓN PARA INICIALIZAR VISIBILIDAD ---
             print(f"DEBUG crear_nodo: Llamando a _inicializar_nodo_visibilidad para nodo {nodo.get('id')}")
@@ -1816,8 +1991,21 @@ class EditorController(QObject):
                 
             print(f"✓ Nodo ID {nodo.get('id')} ({tipo}) creado con botón de visibilidad en ({x_m:.2f}, {y_m:.2f}) metros")
             print("Nodo creado:", getattr(nodo, "to_dict", lambda: nodo)())
+            
+            # REGISTRAR CREACIÓN EN HISTORIAL (NUEVO)
+            if registrar_historial:
+                print(f"DEBUG crear_nodo: Registrando creación en historial para nodo ID {nodo.get('id')}")
+                self._registrar_creacion_nodo(nodo)
+            else:
+                print(f"DEBUG crear_nodo: NO se registra en historial (registrar_historial=False)")
+            
+            return nodo_item  # ← RETORNAR EL NODOITEM
+                
         except Exception as e:
             print(f"ERROR en crear_nodo: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
     # --- NUEVA FUNCIÓN CENTRALIZADA PARA INICIALIZAR VISIBILIDAD ---
     def _inicializar_nodo_visibilidad(self, nodo, agregar_a_lista=True):
