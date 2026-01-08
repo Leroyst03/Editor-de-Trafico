@@ -264,15 +264,21 @@ class EditorController(QObject):
                     print("MODO MOVER: ArrowCursor (no sobre nodo)")
                     
             elif self.modo_actual == "colocar":
-                # MODO COLOCAR VÉRTICE
+                # MODO COLOCAR VÉRTICE - SIEMPRE flecha
                 cursor = Qt.ArrowCursor
                 print("MODO COLOCAR: ArrowCursor")
                 
             elif self.modo_actual == "ruta":
-                # MODO RUTA
-                cursor = Qt.ArrowCursor
-                print("MODO RUTA: ArrowCursor")
-                
+                # MODO RUTA - AHORA IGUAL QUE MODO MOVER (sin arrastre)
+                if self._cursor_sobre_nodo:
+                    # PointingHandCursor cuando está sobre un nodo
+                    cursor = Qt.PointingHandCursor
+                    print("MODO RUTA: PointingHandCursor (sobre nodo)")
+                else:
+                    # Flecha cuando no está sobre un nodo
+                    cursor = Qt.ArrowCursor
+                    print("MODO RUTA: ArrowCursor (no sobre nodo)")
+                    
             else:
                 # Cualquier otro modo
                 cursor = Qt.ArrowCursor
@@ -605,22 +611,9 @@ class EditorController(QObject):
     
     def cancelar_ruta_actual(self):
         """Cancela la creación de la ruta actual cuando se presiona Escape"""
+        # En lugar de código específico para ruta, llamamos al método general
         if self.modo_actual == "ruta":
-            try:
-                # Cancelar la ruta primero
-                self.ruta_ctrl.cancelar_ruta_actual()
-                print("✓ Ruta cancelada con Escape")
-                
-                # Desactivar el botón de ruta
-                self.view.crear_ruta_button.setChecked(False)
-                # Y llamar a cambiar_modo para limpiar todo
-                self.cambiar_modo(self.view.crear_ruta_button)
-                
-                # --- NUEVO: Actualizar descripción al volver a modo navegación ---
-                self.actualizar_descripcion_modo("navegacion")
-                
-            except Exception as e:
-                print(f"Error al cancelar ruta: {e}")
+            self.cancelar_modo_actual()
         else:
             print("⚠ No estás en modo Ruta")
     
@@ -704,9 +697,9 @@ class EditorController(QObject):
             elif event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
                 self.finalizar_ruta_actual()
                 event.accept()
-            # Escape para cancelar ruta
+            # Escape para cancelar cualquier modo activo y volver a navegación
             elif event.key() == Qt.Key_Escape:
-                self.cancelar_ruta_actual()
+                self.cancelar_modo_actual()
                 event.accept()
             else:
                 event.ignore()
@@ -714,8 +707,67 @@ class EditorController(QObject):
             print(f"Error en keyPressEvent: {e}")
             event.ignore()
 
+    def cancelar_modo_actual(self):
+        """
+        Cancela cualquier modo activo y regresa al modo navegación.
+        Se llama cuando se presiona la tecla Escape.
+        """
+        try:
+            print(f"Cancelando modo actual: {self.modo_actual}")
+            
+            # Si ya estamos en modo navegación (None), no hacer nada
+            if self.modo_actual is None:
+                print("Ya estamos en modo navegación")
+                return
+            
+            # Determinar qué botón está activo basado en el modo actual
+            boton_activo = None
+            
+            if self.modo_actual == "mover":
+                boton_activo = self.view.mover_button
+                print("Cancelando modo Mover")
+            
+            elif self.modo_actual == "colocar":
+                boton_activo = self.view.colocar_vertice_button
+                print("Cancelando modo Colocar")
+                
+                # IMPORTANTE: Cancelar cualquier acción pendiente en modo colocar
+                try:
+                    self.colocar_ctrl.desactivar()
+                except Exception as e:
+                    print(f"Error al desactivar modo colocar: {e}")
+            
+            elif self.modo_actual == "ruta":
+                boton_activo = self.view.crear_ruta_button
+                print("Cancelando modo Ruta")
+                
+                # IMPORTANTE: Cancelar la ruta actual primero
+                try:
+                    self.ruta_ctrl.cancelar_ruta_actual()
+                except Exception as e:
+                    print(f"Error al cancelar ruta: {e}")
+            
+            # Desactivar el botón y cambiar al modo navegación
+            if boton_activo and boton_activo.isChecked():
+                print(f"Desactivando botón: {boton_activo.text()}")
+                boton_activo.setChecked(False)
+                
+                # Llamar a cambiar_modo para realizar la desactivación completa
+                self.cambiar_modo(boton_activo)
+            
+            # Forzar actualización del cursor
+            self._actualizar_cursor()
+            
+            # Mostrar mensaje de confirmación
+            print(f"✓ Modo cancelado. Regresando a navegación")
+            
+            # Actualizar descripción del modo
+            self.actualizar_descripcion_modo("navegacion")
+            
+        except Exception as e:
+            print(f"Error al cancelar modo actual: {e}")
+
     # --- SISTEMA DE DESHACER/REHACER (UNDO/REDO) ---
-    
     # --- MÉTODOS PARA REGISTRAR CAMBIOS DE PROPIEDADES ---
     def registrar_cambio_propiedad_nodo(self, nodo_id, propiedad, valor_anterior, valor_nuevo):
         """
@@ -761,6 +813,167 @@ class EditorController(QObject):
             
         except Exception as e:
             print(f"Error registrando cambio de propiedad de nodo: {e}")
+
+    def _registrar_creacion_nodo(self, nodo):
+        """
+        Registra la creación de un nodo en el historial UNDO/REDO.
+        
+        Args:
+            nodo: El nodo creado (con ID, X, Y, objetivo, es_cargador, etc.)
+        """
+        if self._ejecutando_deshacer_rehacer:
+            return
+        
+        try:
+            # Si estamos en medio del historial (por deshacer previo), eliminar movimientos futuros
+            if self.indice_historial < len(self.historial_movimientos) - 1:
+                self.historial_movimientos = self.historial_movimientos[:self.indice_historial + 1]
+            
+            # Crear entrada del historial
+            creacion = {
+                'tipo': 'creacion',
+                'nodo': copy.deepcopy(nodo),
+                'descripcion': f"Creación de nodo ID {nodo.get('id')}"
+            }
+            
+            # Agregar al historial
+            self.historial_movimientos.append(creacion)
+            
+            # Limitar tamaño del historial
+            if len(self.historial_movimientos) > self.max_historial:
+                self.historial_movimientos.pop(0)
+            
+            # Actualizar el índice al nuevo elemento
+            self.indice_historial = len(self.historial_movimientos) - 1
+            
+            print(f"✓ Creación registrada en historial: Nodo ID {nodo.get('id')}")
+            print(f"  Índice actual: {self.indice_historial}, Historial total: {len(self.historial_movimientos)}")
+            
+        except Exception as e:
+            print(f"Error registrando creación de nodo: {e}")
+
+    # --- MÉTODOS PARA DESHACER/REHACER CREACIÓN DE NODOS ---
+    def _deshacer_creacion_nodo(self, accion):
+        """Deshace la creación de un nodo (es decir, lo elimina)"""
+        try:
+            self._ejecutando_deshacer_rehacer = True
+            
+            nodo = accion['nodo']
+            nodo_id = nodo.get('id')
+            
+            print(f"Deshaciendo creación: Nodo ID {nodo_id}")
+            
+            # ANTES de eliminar: verificar si está en la secuencia de ruta
+            en_secuencia_ruta = False
+            if hasattr(self, 'ruta_ctrl') and self.ruta_ctrl.activo:
+                en_secuencia_ruta = self.ruta_ctrl.contiene_nodo_en_secuencia(nodo_id)
+                print(f"  Nodo en secuencia de ruta: {en_secuencia_ruta}")
+            
+            # Buscar el nodo en la escena y en el proyecto
+            nodo_item_a_eliminar = None
+            nodo_en_proyecto = None
+            
+            # Buscar en la escena
+            for item in self.scene.items():
+                if isinstance(item, NodoItem) and item.nodo.get('id') == nodo_id:
+                    nodo_item_a_eliminar = item
+                    nodo_en_proyecto = item.nodo
+                    break
+            
+            # Si no está en la escena, buscar en el proyecto
+            if not nodo_en_proyecto:
+                for n in self.proyecto.nodos:
+                    if n.get('id') == nodo_id:
+                        nodo_en_proyecto = n
+                        break
+            
+            # Eliminar el nodo (sin registrar en historial)
+            if nodo_en_proyecto:
+                # Usar eliminación sin historial
+                self._eliminar_nodo_sin_historial(nodo_en_proyecto, nodo_item_a_eliminar)
+            
+            # DESPUÉS de eliminar: si estaba en secuencia de ruta, actualizar
+            if en_secuencia_ruta:
+                print(f"  Actualizando secuencia de ruta después de eliminar nodo {nodo_id}")
+                self.ruta_ctrl.remover_nodo_de_secuencia(nodo_id)
+                
+                # Si después de remover no quedan nodos, limpiar estado
+                if not self.ruta_ctrl._nodes_seq:
+                    print("  ✓ Secuencia de ruta vaciada completamente")
+                    # Restaurar colores de todos los nodos
+                    self.restaurar_colores_nodos()
+            
+            # Decrementar índice del historial
+            self.indice_historial -= 1
+            
+            print(f"✓ Creación deshecha: Nodo ID {nodo_id} eliminado")
+            
+        except Exception as e:
+            print(f"Error deshaciendo creación de nodo: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self._ejecutando_deshacer_rehacer = False
+
+    def _rehacer_creacion_nodo(self, accion):
+        """Rehace la creación de un nodo (es decir, lo vuelve a crear)"""
+        try:
+            self._ejecutando_deshacer_rehacer = True
+            
+            nodo = accion['nodo']
+            nodo_id = nodo.get('id')
+            x = nodo.get('X')
+            y = nodo.get('Y')
+            objetivo = nodo.get('objetivo', 0)
+            es_cargador = nodo.get('es_cargador', 0)
+            angulo = nodo.get('A', 0)
+            
+            print(f"Rehaciendo creación: Nodo ID {nodo_id} en ({x}, {y})")
+            
+            # Verificar si el nodo ya existe (no debería, pero por seguridad)
+            nodo_existente = None
+            for n in self.proyecto.nodos:
+                if n.get('id') == nodo_id:
+                    nodo_existente = n
+                    break
+            
+            if nodo_existente:
+                print(f"Nodo ID {nodo_id} ya existe, no es necesario recrearlo")
+            else:
+                # Crear nuevo nodo en el proyecto (sin registrar en historial)
+                nuevo_nodo = {
+                    "id": nodo_id,
+                    "X": x,
+                    "Y": y,
+                    "objetivo": objetivo,
+                    "es_cargador": es_cargador,
+                    "A": angulo
+                }
+                self.proyecto.nodos.append(nuevo_nodo)
+                
+                # Crear NodoItem visual
+                nodo_item = self._create_nodo_item(nuevo_nodo)
+                
+                # Inicializar visibilidad
+                self._inicializar_nodo_visibilidad(nuevo_nodo, agregar_a_lista=True)
+                
+                # Actualizar lista de nodos
+                self._actualizar_lista_nodos_con_widgets()
+                
+                # Redibujar rutas si es necesario
+                self._dibujar_rutas()
+                
+                print(f"✓ Creación rehecha: Nodo ID {nodo_id} recreado")
+            
+            # IMPORTANTE: No necesitamos agregar a secuencia de ruta automáticamente
+            # porque el usuario debe decidir si quiere añadirlo nuevamente a la ruta
+            
+        except Exception as e:
+            print(f"Error rehaciendo creación de nodo: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self._ejecutando_deshacer_rehacer = False
 
     def registrar_cambio_propiedad_ruta(self, ruta_idx, propiedad, valor_anterior, valor_nuevo):
         """
@@ -1199,6 +1412,8 @@ class EditorController(QObject):
                 self._deshacer_cambio_propiedad_nodo(accion)
             elif tipo == 'cambio_propiedad_ruta':
                 self._deshacer_cambio_propiedad_ruta(accion)
+            elif tipo == 'creacion':
+                self._deshacer_creacion_nodo(accion)  # NUEVO
             else:
                 # Acción de movimiento (comportamiento original)
                 self._deshacer_movimiento_original(accion)
@@ -1319,7 +1534,7 @@ class EditorController(QObject):
     def _eliminar_nodo_sin_historial(self, nodo, nodo_item):
         """
         Elimina un nodo sin registrar en el historial UNDO/REDO.
-        Usado para rehacer eliminaciones.
+        Usado para rehacer eliminaciones y para deshacer creaciones.
         """
         try:
             nodo_id = nodo.get("id")
@@ -1347,7 +1562,6 @@ class EditorController(QObject):
             self._reconfigurar_rutas_por_eliminacion(nodo_id)
             
             # 5) IMPORTANTE: Reconstruir relaciones de TODAS las rutas después de la eliminación
-            # Esta es la parte crítica que faltaba
             self._actualizar_todas_relaciones_nodo_ruta()
             
             # 6) Actualizar UI
@@ -1355,7 +1569,7 @@ class EditorController(QObject):
             self._dibujar_rutas()
             self._actualizar_lista_rutas_con_widgets()
             
-            print(f"✓ Nodo ID {nodo_id} reeliminado")
+            print(f"✓ Nodo ID {nodo_id} reeliminado (sin historial)")
             
         except Exception as e:
             print(f"Error en eliminación sin historial: {e}")
@@ -1478,6 +1692,8 @@ class EditorController(QObject):
                 self._rehacer_cambio_propiedad_nodo(accion)
             elif tipo == 'cambio_propiedad_ruta':
                 self._rehacer_cambio_propiedad_ruta(accion)
+            elif tipo == 'creacion':
+                self._rehacer_creacion_nodo(accion)  # NUEVO
             else:
                 # Acción de movimiento (comportamiento original)
                 self._rehacer_movimiento_original(accion)
@@ -1679,6 +1895,13 @@ class EditorController(QObject):
             nodo_item.moved.connect(self.on_nodo_moved)
         except Exception:
             pass
+        
+        # CONEXIÓN DE SEÑALES HOVER
+        try:
+            nodo_item.hover_entered.connect(self.nodo_hover_entered)
+            nodo_item.hover_leaved.connect(self.nodo_hover_leaved)
+        except Exception as e:
+            print(f"Error conectando señales hover: {e}")
 
         # Añadir a la escena y devolver
         try:
@@ -1688,10 +1911,20 @@ class EditorController(QObject):
 
         return nodo_item
 
-    def crear_nodo(self, x=100, y=100):
+    def crear_nodo(self, x=100, y=100, registrar_historial=True):
+        """
+        Crea un nuevo nodo en las coordenadas especificadas.
+        
+        Args:
+            x, y: Coordenadas en píxeles
+            registrar_historial: Si True, registra la creación en el historial UNDO/REDO
+            
+        Returns:
+            NodoItem: El nodo visual creado (o None si falló)
+        """
         if not self.proyecto:
             print("No hay proyecto cargado")
-            return
+            return None
 
         try:
             print(f"DEBUG crear_nodo: Creando nodo en ({x}, {y}) píxeles")
@@ -1728,6 +1961,7 @@ class EditorController(QObject):
                     nodo_item.moved.connect(self.on_nodo_moved)
                 except Exception as e2:
                     print(f"DEBUG crear_nodo: Error al configurar NodoItem: {e2}")
+                    return None
 
             # --- NUEVA FUNCIÓN PARA INICIALIZAR VISIBILIDAD ---
             print(f"DEBUG crear_nodo: Llamando a _inicializar_nodo_visibilidad para nodo {nodo.get('id')}")
@@ -1757,8 +1991,21 @@ class EditorController(QObject):
                 
             print(f"✓ Nodo ID {nodo.get('id')} ({tipo}) creado con botón de visibilidad en ({x_m:.2f}, {y_m:.2f}) metros")
             print("Nodo creado:", getattr(nodo, "to_dict", lambda: nodo)())
+            
+            # REGISTRAR CREACIÓN EN HISTORIAL (NUEVO)
+            if registrar_historial:
+                print(f"DEBUG crear_nodo: Registrando creación en historial para nodo ID {nodo.get('id')}")
+                self._registrar_creacion_nodo(nodo)
+            else:
+                print(f"DEBUG crear_nodo: NO se registra en historial (registrar_historial=False)")
+            
+            return nodo_item  # ← RETORNAR EL NODOITEM
+                
         except Exception as e:
             print(f"ERROR en crear_nodo: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
     # --- NUEVA FUNCIÓN CENTRALIZADA PARA INICIALIZAR VISIBILIDAD ---
     def _inicializar_nodo_visibilidad(self, nodo, agregar_a_lista=True):
@@ -2326,13 +2573,33 @@ class EditorController(QObject):
         except Exception:
             pass
 
+    def _obtener_ruta_completa(self, ruta_dict):
+        """Obtiene todos los nodos de la ruta en orden: origen, visitas, destino"""
+        nodos = []
+        
+        # Origen
+        origen = ruta_dict.get("origen")
+        if origen:
+            nodos.append(origen)
+        
+        # Visita
+        visita = ruta_dict.get("visita", [])
+        nodos.extend(visita)
+        
+        # Destino
+        destino = ruta_dict.get("destino")
+        if destino:
+            nodos.append(destino)
+        
+        return nodos
+
     def mostrar_propiedades_ruta(self, ruta):
         """
         Muestra la ruta en propertiesTable con el formato:
         Nombre: nombre_ruta
         Origen: id_origen
         Destino: id_destino  
-        visita: [id1, id2, id3]
+        Ruta completa: [id_origen, id1, id2, id3, id_destino]
         """
         if not ruta:
             return
@@ -2354,12 +2621,20 @@ class EditorController(QObject):
         self.view.propertiesTable.setColumnCount(2)
         self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
 
-        # Mostrar nombre, origen, destino y visita
+        # Obtener IDs de la ruta completa
+        ruta_completa_ids = self._obtener_ids_ruta_completa(ruta_dict)
+        ruta_completa_str = f"[{', '.join(str(id) for id in ruta_completa_ids)}]"
+        
+        # Obtener origen y destino actuales
+        origen_id = self._obtener_id_nodo(ruta_dict.get("origen"))
+        destino_id = self._obtener_id_nodo(ruta_dict.get("destino"))
+        
+        # Mostrar propiedades
         propiedades = [
             ("Nombre", ruta_dict.get("nombre", "Ruta")),
-            ("Origen", self._obtener_id_nodo(ruta_dict.get("origen"))),
-            ("Destino", self._obtener_id_nodo(ruta_dict.get("destino"))),
-            ("visita", self._obtener_ids_visita(ruta_dict.get("visita", [])))
+            ("Origen", origen_id),
+            ("Destino", destino_id),
+            ("Ruta completa", ruta_completa_str)
         ]
 
         self.view.propertiesTable.setRowCount(len(propiedades))
@@ -2399,6 +2674,80 @@ class EditorController(QObject):
             ids.append(self._obtener_id_nodo(nodo))
         return f"[{', '.join(str(id) for id in ids)}]"
 
+    def _obtener_ids_ruta_completa(self, ruta_dict):
+        """Devuelve una lista de IDs de la ruta completa (origen + visita + destino)"""
+        ids = []
+        
+        # Origen
+        origen = ruta_dict.get("origen")
+        if origen:
+            origen_id = self._obtener_id_nodo(origen)
+            if origen_id:
+                ids.append(origen_id)
+        
+        # Visita (nodos intermedios)
+        visita = ruta_dict.get("visita", [])
+        for nodo_visita in visita:
+            nodo_id = self._obtener_id_nodo(nodo_visita)
+            if nodo_id:
+                ids.append(nodo_id)
+        
+        # Destino
+        destino = ruta_dict.get("destino")
+        if destino:
+            destino_id = self._obtener_id_nodo(destino)
+            if destino_id and (not ids or destino_id != ids[0]):  # No agregar si es igual al origen
+                ids.append(destino_id)
+        
+        return ids
+
+    def _actualizar_ruta_desde_ids(self, ruta_dict, ids_ruta):
+        """
+        Actualiza la estructura de ruta (origen, visita, destino) a partir de una lista de IDs.
+        Mantiene compatibilidad con la estructura existente.
+        """
+        if not ids_ruta:
+            ruta_dict["origen"] = None
+            ruta_dict["destino"] = None
+            ruta_dict["visita"] = []
+            return
+        
+        # Primer elemento es el origen
+        primer_id = ids_ruta[0]
+        nodo_existente = next((n for n in self.proyecto.nodos 
+                            if self._obtener_id_nodo(n) == primer_id), None)
+        if nodo_existente:
+            ruta_dict["origen"] = nodo_existente
+        else:
+            ruta_dict["origen"] = {"id": primer_id, "X": 0, "Y": 0}
+        
+        # Último elemento es el destino (si hay más de un elemento)
+        if len(ids_ruta) > 1:
+            ultimo_id = ids_ruta[-1]
+            nodo_existente = next((n for n in self.proyecto.nodos 
+                                if self._obtener_id_nodo(n) == ultimo_id), None)
+            if nodo_existente:
+                ruta_dict["destino"] = nodo_existente
+            else:
+                ruta_dict["destino"] = {"id": ultimo_id, "X": 0, "Y": 0}
+        else:
+            # Si solo hay un elemento, el destino es el mismo que el origen
+            ruta_dict["destino"] = ruta_dict["origen"]
+        
+        # Elementos intermedios son la visita
+        if len(ids_ruta) > 2:
+            nueva_visita = []
+            for id_intermedio in ids_ruta[1:-1]:
+                nodo_existente = next((n for n in self.proyecto.nodos 
+                                    if self._obtener_id_nodo(n) == id_intermedio), None)
+                if nodo_existente:
+                    nueva_visita.append(nodo_existente)
+                else:
+                    nueva_visita.append({"id": id_intermedio, "X": 0, "Y": 0})
+            ruta_dict["visita"] = nueva_visita
+        else:
+            ruta_dict["visita"] = []
+            
     def _actualizar_propiedad_ruta(self, item):
         """Actualiza la ruta a través del proyecto para notificar cambios"""
         if item.column() != 1:
@@ -2437,8 +2786,10 @@ class EditorController(QObject):
                 valor_anterior = self._obtener_id_nodo(ruta_dict.get("origen"))
             elif campo == "destino":
                 valor_anterior = self._obtener_id_nodo(ruta_dict.get("destino"))
-            elif campo == "visita":
-                valor_anterior = self._obtener_ids_visita(ruta_dict.get("visita", []))
+            elif campo == "ruta completa":
+                # Obtener la ruta completa actual como string
+                ruta_completa_ids = self._obtener_ids_ruta_completa(ruta_dict)
+                valor_anterior = f"[{', '.join(str(id) for id in ruta_completa_ids)}]"
             
             print(f"Actualizando ruta - Campo: {campo}, Valor: {texto}")
             
@@ -2447,67 +2798,75 @@ class EditorController(QObject):
             if campo == "nombre":
                 valor_nuevo = texto
                 ruta_dict["nombre"] = texto
+                
             elif campo == "origen":
                 try:
-                    valor_nuevo = int(texto)
-                    # Buscar nodo existente o crear uno temporal
-                    nodo_existente = next((n for n in getattr(self.proyecto, "nodos", []) 
-                                        if self._obtener_id_nodo(n) == valor_nuevo), None)
-                    if nodo_existente:
-                        ruta_dict["origen"] = nodo_existente
+                    nuevo_origen_id = int(texto)
+                    # Obtener la ruta completa actual
+                    ruta_completa_ids = self._obtener_ids_ruta_completa(ruta_dict)
+                    
+                    if ruta_completa_ids:
+                        # Actualizar solo el primer elemento
+                        ruta_completa_ids[0] = nuevo_origen_id
                     else:
-                        # Crear nodo temporal (será normalizado después)
-                        ruta_dict["origen"] = {"id": valor_nuevo, "X": 0, "Y": 0}
+                        # Si no hay ruta, crear una nueva
+                        ruta_completa_ids = [nuevo_origen_id]
+                    
+                    # Reconstruir ruta a partir de la lista de IDs
+                    self._actualizar_ruta_desde_ids(ruta_dict, ruta_completa_ids)
+                    valor_nuevo = nuevo_origen_id
                 except ValueError:
                     print(f"Error: ID de origen debe ser un número entero")
                     return
                     
             elif campo == "destino":
                 try:
-                    valor_nuevo = int(texto)
-                    # Buscar nodo existente o crear uno temporal
-                    nodo_existente = next((n for n in getattr(self.proyecto, "nodos", []) 
-                                        if self._obtener_id_nodo(n) == valor_nuevo), None)
-                    if nodo_existente:
-                        ruta_dict["destino"] = nodo_existente
+                    nuevo_destino_id = int(texto)
+                    # Obtener la ruta completa actual
+                    ruta_completa_ids = self._obtener_ids_ruta_completa(ruta_dict)
+                    
+                    if ruta_completa_ids:
+                        # Actualizar solo el último elemento
+                        if len(ruta_completa_ids) > 1:
+                            ruta_completa_ids[-1] = nuevo_destino_id
+                        else:
+                            # Si solo hay un elemento, agregar el destino
+                            ruta_completa_ids.append(nuevo_destino_id)
                     else:
-                        # Crear nodo temporal (será normalizado después)
-                        ruta_dict["destino"] = {"id": valor_nuevo, "X": 0, "Y": 0}
+                        # Si no hay ruta, crear una nueva
+                        ruta_completa_ids = [nuevo_destino_id]
+                    
+                    # Reconstruir ruta a partir de la lista de IDs
+                    self._actualizar_ruta_desde_ids(ruta_dict, ruta_completa_ids)
+                    valor_nuevo = nuevo_destino_id
                 except ValueError:
                     print(f"Error: ID de destino debe ser un número entero")
                     return
                     
-            elif campo == "visita":
+            elif campo == "ruta completa":
                 try:
                     # Parsear lista de IDs: [1, 2, 3] o 1, 2, 3
                     if texto.startswith('[') and texto.endswith(']'):
                         texto = texto[1:-1]
                     
                     ids_texto = [id_str.strip() for id_str in texto.split(',')] if texto else []
-                    nueva_visita = []
-                    valor_nuevo = []
+                    nueva_ruta_completa = []
                     
                     for id_str in ids_texto:
                         if id_str:  # Ignorar strings vacíos
                             try:
                                 nodo_id = int(id_str)
-                                valor_nuevo.append(nodo_id)
-                                # Buscar nodo existente
-                                nodo_existente = next((n for n in getattr(self.proyecto, "nodos", []) 
-                                                    if self._obtener_id_nodo(n) == nodo_id), None)
-                                if nodo_existente:
-                                    nueva_visita.append(nodo_existente)
-                                else:
-                                    # Crear nodo temporal
-                                    nueva_visita.append({"id": nodo_id, "X": 0, "Y": 0})
+                                nueva_ruta_completa.append(nodo_id)
                             except ValueError:
-                                print(f"Error: ID de visita debe ser número entero: {id_str}")
+                                print(f"Error: ID de ruta debe ser número entero: {id_str}")
                     
-                    ruta_dict["visita"] = nueva_visita
-                    valor_nuevo = str(valor_nuevo)  # Guardar como string para historial
+                    # Reconstruir ruta a partir de la lista de IDs
+                    self._actualizar_ruta_desde_ids(ruta_dict, nueva_ruta_completa)
+                    valor_nuevo = f"[{', '.join(str(id) for id in nueva_ruta_completa)}]"
                     
                 except Exception as e:
-                    print(f"Error procesando lista de visita: {e}")
+                    print(f"Error procesando ruta completa: {e}")
+                    return
 
             # Registrar cambio en historial
             if valor_anterior is not None and valor_nuevo is not None and valor_anterior != valor_nuevo:
@@ -2524,6 +2883,13 @@ class EditorController(QObject):
             
             # Actualizar el texto en la lista lateral de rutas
             self._actualizar_widget_ruta_en_lista(self.ruta_actual_idx)
+            
+            # Redibujar rutas
+            self._dibujar_rutas()
+            
+            # Actualizar la tabla de propiedades para mostrar cambios
+            if self.ruta_actual_idx == self.ruta_actual_idx:
+                self.mostrar_propiedades_ruta(ruta_dict)
             
             print(f"Ruta actualizada exitosamente")
             
@@ -3721,8 +4087,9 @@ class EditorController(QObject):
 
     # --- Event filter para deselección al clicar en fondo ---
     def eventFilter(self, obj, event):
-        # Detectar teclas presionadas
+       # Detectar teclas presionadas
         if event.type() == QEvent.KeyPress:
+            # Pasar el evento a keyPressEvent para manejo centralizado
             self.keyPressEvent(event)
             return True
         
@@ -3753,14 +4120,13 @@ class EditorController(QObject):
             pos = self.view.marco_trabajo.mapToScene(event.pos())
             
             # PRIMERO: Si estamos en modo ruta o modo colocar, NO manejar el clic aquí
+            # Los controladores respectivos manejarán los clics a través de su eventFilter
             if self.modo_actual in ["ruta", "colocar"]:
-                return False
+                return False  # Dejar que el controlador respectivo maneje el clic
             
-            # Verificar si hay nodos en la posición del clic
+            # SEGUNDO: Comportamiento normal (solo si NO estamos en modo ruta o colocar)
             items = self.scene.items(pos)
-            hay_nodo = any(isinstance(it, NodoItem) for it in items)
-            
-            if not hay_nodo:
+            if not any(isinstance(it, NodoItem) for it in items):
                 # Click fuera de nodo
                 print("CLICK FUERA DE NODO - Forzar estado normal")
                 
@@ -3792,7 +4158,7 @@ class EditorController(QObject):
                     if hasattr(self.view, "rutasList"):
                         self.view.rutasList.clearSelection()
                 except Exception:
-                    pass
+                        pass
                 
                 self._clear_highlight_lines()
                 

@@ -72,7 +72,7 @@ class RutaController(QObject):
                     print(f"✓ Clic en nodo existente ID {item.nodo.get('id')}")
                     self._add_existing_node(item)
                 else:
-                    # Crear nuevo nodo en la posición del clic
+                    # CORRECCIÓN: Usar el método crear_nodo del editor para registrar en historial
                     print(f"✓ Creando nuevo nodo en posición ({x_m:.2f}, {y_m:.2f}) metros")
                     self._create_and_add_node(int(scene_pos.x()), int(scene_pos.y()))
                 return True
@@ -80,30 +80,17 @@ class RutaController(QObject):
 
     def _create_and_add_node(self, x, y):
         """Crea un nuevo nodo y lo añade a la ruta"""
-        # Crear el nodo en el modelo (esto emitirá la señal nodo_agregado)
-        nodo = self.proyecto.agregar_nodo(x, y)
+        # CORRECCIÓN: Usar el método crear_nodo del editor para registrar en historial
+        # Esto creará el nodo en el proyecto y retornará el NodoItem
+        nodo_item = self.editor.crear_nodo(x, y, registrar_historial=True)
         
-        # Asegurar que el nodo tenga campo "objetivo"
-        if isinstance(nodo, dict):
-            if "objetivo" not in nodo:
-                nodo["objetivo"] = 0
-        elif not hasattr(nodo, "objetivo"):
-            setattr(nodo, "objetivo", 0)
-        
-        # Crear visual mediante helper del editor
-        try:
-            nodo_item = self.editor._create_nodo_item(nodo)
-        except Exception:
-            nodo_item = NodoItem(nodo, editor=self.editor)
-            nodo_item.setZValue(1)
-            self.view.marco_trabajo.scene().addItem(nodo_item)
-            try:
-                nodo_item.moved.connect(self.editor.on_nodo_moved)
-            except Exception:
-                pass
-
-        # Añadir a la secuencia de la ruta y dibujar segmento si hay anterior
-        self._append_node_to_route(nodo, nodo_item)
+        if nodo_item and hasattr(nodo_item, 'nodo'):
+            # Añadir a la secuencia de la ruta y dibujar segmento si hay anterior
+            self._append_node_to_route(nodo_item.nodo, nodo_item)
+            return True
+        else:
+            print("✗ Error: No se pudo crear el nodo")
+            return False
 
     def _add_existing_node(self, nodo_item):
         """Añade un nodo existente a la ruta"""
@@ -123,10 +110,6 @@ class RutaController(QObject):
                 nodo_item.set_selected_color()
             except Exception:
                 pass
-            return
-
-        # Evitar duplicados consecutivos
-        if self._nodes_seq and self._nodes_seq[-1].get("id") == nodo.get("id"):
             return
 
         # Dibujar línea entre last_item y nodo_item
@@ -283,3 +266,64 @@ class RutaController(QObject):
         self._nodes_seq = []
         self._last_item = None
         self._clear_temp_lines()
+
+    def remover_nodo_de_secuencia(self, nodo_id):
+        """
+        Remueve un nodo de la secuencia de la ruta en construcción.
+        Se llama cuando se deshace la creación de un nodo.
+        """
+        if not self.activo or not self._nodes_seq:
+            return
+            
+        print(f"RutaController: Removiendo nodo {nodo_id} de la secuencia")
+        
+        # Buscar el índice del nodo en la secuencia
+        nodo_idx = None
+        for i, nodo in enumerate(self._nodes_seq):
+            if nodo.get('id') == nodo_id:
+                nodo_idx = i
+                break
+        
+        if nodo_idx is None:
+            # El nodo no está en la secuencia
+            return
+        
+        # Remover el nodo de la secuencia
+        self._nodes_seq.pop(nodo_idx)
+        
+        # Limpiar todas las líneas temporales
+        self._clear_temp_lines()
+        
+        # Actualizar last_item si era el nodo eliminado
+        if self._last_item and self._last_item.nodo.get('id') == nodo_id:
+            if self._nodes_seq:
+                # Buscar el último nodo restante en la escena
+                last_nodo = self._nodes_seq[-1]
+                for item in self.view.marco_trabajo.scene().items():
+                    if isinstance(item, NodoItem) and item.nodo.get('id') == last_nodo.get('id'):
+                        self._last_item = item
+                        # Restaurar color normal al nuevo último nodo
+                        item.set_normal_color()
+                        break
+            else:
+                self._last_item = None
+        
+        # Redibujar líneas temporales si hay al menos 2 nodos restantes
+        if len(self._nodes_seq) >= 2:
+            self._update_temp_lines()
+        
+        # Restaurar colores de todos los nodos restantes
+        for nodo in self._nodes_seq:
+            for item in self.view.marco_trabajo.scene().items():
+                if isinstance(item, NodoItem) and item.nodo.get('id') == nodo.get('id'):
+                    item.set_normal_color()
+                    break
+        
+        print(f"  ✓ Nodo removido de secuencia. Nodos restantes: {len(self._nodes_seq)}")
+        
+    def contiene_nodo_en_secuencia(self, nodo_id):
+        """Verifica si un nodo está en la secuencia de construcción actual"""
+        for nodo in self._nodes_seq:
+            if nodo.get('id') == nodo_id:
+                return True
+        return False
