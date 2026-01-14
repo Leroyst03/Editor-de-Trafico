@@ -3,10 +3,11 @@ from PyQt5.QtWidgets import (
     QButtonGroup, QListWidgetItem,
     QTableWidgetItem, QHeaderView, QMenu, QMessageBox, QLabel
 )
-from PyQt5.QtGui import QPixmap, QPen, QColor, QCursor
+from PyQt5.QtGui import QPixmap, QPen, QCursor
 from PyQt5.QtCore import Qt, QEvent, QObject, QSize
 from Model.Proyecto import Proyecto
 from Model.ExportadorDB import ExportadorDB
+from Model.ExportadorCSV import ExportadorCSV 
 from Controller.mover_controller import MoverController
 from Controller.colocar_controller import ColocarController
 from Controller.ruta_controller import RutaController
@@ -50,8 +51,12 @@ class EditorController(QObject):
         
         # --- NUEVO: Submenú Exportar ---
         self.view.menuProyecto.addSeparator()  # Separador visual
-        exportar_action = self.view.menuProyecto.addAction("Exportar a SQLite...")
-        exportar_action.triggered.connect(self.exportar_a_sqlite)
+        exportar_sqlite_action = self.view.menuProyecto.addAction("Exportar a SQLite...")
+        exportar_sqlite_action.triggered.connect(self.exportar_a_sqlite)
+        
+        # --- NUEVO: Opción para exportar a CSV ---
+        exportar_csv_action = self.view.menuProyecto.addAction("Exportar a CSV...")
+        exportar_csv_action.triggered.connect(self.exportar_a_csv)
 
         nuevo_action.triggered.connect(self.nuevo_proyecto)
         abrir_action.triggered.connect(self.abrir_proyecto)
@@ -656,7 +661,7 @@ class EditorController(QObject):
                     f"¿Estás seguro de que quieres eliminar el nodo ID {nodo_id}?\n\n"
                     f"Esta acción eliminará el nodo y reconfigurará las rutas que lo contengan.",
                     QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No
+                    QMessageBox.Yes  # <- CAMBIO AQUÍ: Yes es ahora el botón por defecto
                 )
                 
                 if reply == QMessageBox.Yes:
@@ -676,7 +681,7 @@ class EditorController(QObject):
         except Exception as e:
             print(f"Error al eliminar nodo: {e}")
             QMessageBox.warning(self.view, "Error", 
-                               f"No se pudo eliminar el nodo:\n{str(e)}")
+                            f"No se pudo eliminar el nodo:\n{str(e)}")
 
     def keyPressEvent(self, event):
         """Maneja eventos de teclado globales"""
@@ -4901,6 +4906,44 @@ class EditorController(QObject):
         if confirmacion == QMessageBox.Yes:
             # Llamar al exportador pasando la escala
             ExportadorDB.exportar(self.proyecto, self.view, self.ESCALA)
+
+    def exportar_a_csv(self):
+        """Exporta el proyecto actual a archivos CSV separados."""
+        if not self.proyecto:
+            QMessageBox.warning(
+                self.view,
+                "No hay proyecto",
+                "Debes crear o abrir un proyecto primero."
+            )
+            return
+
+        # Verificar que hay datos para exportar
+        if not self.proyecto.nodos and not self.proyecto.rutas:
+            QMessageBox.warning(
+                self.view,
+                "Proyecto vacío",
+                "El proyecto no contiene nodos ni rutas para exportar."
+            )
+            return
+
+        # Mostrar diálogo de confirmación
+        confirmacion = QMessageBox.question(
+            self.view,
+            "Confirmar exportación a CSV",
+            f"¿Exportar proyecto actual a CSV?\n\n"
+            f"• Nodos: {len(self.proyecto.nodos)}\n"
+            f"• Rutas: {len(self.proyecto.rutas)}\n\n"
+            f"Se crearán dos archivos:\n"
+            f"  - nodos.csv (todos los atributos de nodos)\n"
+            f"  - rutas.csv (IDs: origen, destino, visitados)\n\n"
+            f"Coordenadas exportadas en METROS (escala: {self.ESCALA})",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+
+        if confirmacion == QMessageBox.Yes:
+            # Llamar al exportador CSV pasando la escala
+            ExportadorCSV.exportar(self.proyecto, self.view, self.ESCALA)
 
     def manejar_seleccion_nodo(self):
         """Maneja la selección de nodos, ajustando z-values para nodos solapados"""

@@ -51,7 +51,8 @@ class ExportadorDB:
                     es_cargador INTEGER,
                     Puerta_Abrir INTEGER,
                     Puerta_Cerrar INTEGER,
-                    Punto_espera INTEGER
+                    Punto_espera INTEGER,
+                    es_curva INTEGER
                 )
             """)
             
@@ -74,8 +75,8 @@ class ExportadorDB:
                                      Seg_alto, Seg_tresD, Tipo_curva, Reloc, 
                                      decision, timeout, ultimo_metro, 
                                      es_cargador, Puerta_Abrir, Puerta_Cerrar, 
-                                     Punto_espera)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     Punto_espera, es_curva)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     datos.get('id'),
                     x_m,  # X en metros
@@ -94,7 +95,8 @@ class ExportadorDB:
                     datos.get('es_cargador', 0),
                     datos.get('Puerta_Abrir', 0),
                     datos.get('Puerta_Cerrar', 0),
-                    datos.get('Punto_espera', 0)
+                    datos.get('Punto_espera', 0),
+                    datos.get('es_curva', 0)  # <-- AQUÍ ESTÁ LA CORRECCIÓN: se añade este valor
                 ))
             
             conn_nodos.commit()

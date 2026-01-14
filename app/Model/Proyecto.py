@@ -38,7 +38,8 @@ class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
             "es_cargador": 0,
             "Puerta_Abrir": 0,
             "Puerta_Cerrar": 0,
-            "Punto_espera": 0
+            "Punto_espera": 0,
+            "es_curva": 0
         }
         nodo = Nodo(datos)
         self.nodos.append(nodo)

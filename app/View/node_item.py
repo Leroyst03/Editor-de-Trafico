@@ -5,17 +5,10 @@ from Model.Nodo import Nodo
 import os
 
 class NodoItem(QGraphicsObject):
-    # Escala única para TODOS los iconos respecto al tamaño del nodo
-    ICON_SCALE = 1.5
-    
-    # CACHE ESTÁTICO - Programación dinámica: cada icono se procesa UNA sola vez
-    # Estructura: { (target_size, nombre_icono, ruta_completa): QPixmap }
+    ICON_SCALE = 1.25
+
     _icon_cache = {}
-    
-    # CACHE para recortes de imágenes - optimización de rendimiento
     _recorte_cache = {}
-    
-    # Estadísticas de cache para debugging
     _cache_stats = {'hits': 0, 'misses': 0}
 
     moved = pyqtSignal(object)
@@ -29,7 +22,7 @@ class NodoItem(QGraphicsObject):
         self.nodo = nodo
         self.size = size
         self.editor = editor
-        
+
         self.z_value_original = 1
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
 
@@ -50,13 +43,11 @@ class NodoItem(QGraphicsObject):
         self._dragging = False
         self._posicion_inicial = None
 
-        # Inicializar iconos (serán asignados desde el cache)
         self._cargar_pixmap = None
         self._descargar_pixmap = None
         self._cargador_pixmap = None
         self._cargador_io_pixmap = None
 
-        # Cargar iconos usando cache (esto será rápido después del primer nodo)
         self._cargar_iconos_con_cache()
 
         self.objetivo = self.nodo.get("objetivo", 0) if hasattr(self.nodo, "get") else getattr(self.nodo, "objetivo", 0)
@@ -68,13 +59,8 @@ class NodoItem(QGraphicsObject):
         self.color_route_selected = QColor(255, 165, 0)
         self.border_color = Qt.black
 
-    # ============================================================
-    # CACHE Y MEMOIZACIÓN - FUNCIONES PRINCIPALES
-    # ============================================================
-
     @classmethod
     def limpiar_cache_iconos(cls):
-        """Limpia el cache de iconos (útil si se cambian los iconos en tiempo de ejecución)."""
         cls._icon_cache.clear()
         cls._recorte_cache.clear()
         cls._cache_stats = {'hits': 0, 'misses': 0}
@@ -82,10 +68,9 @@ class NodoItem(QGraphicsObject):
 
     @classmethod
     def obtener_estadisticas_cache(cls):
-        """Devuelve estadísticas del cache para debugging/optimización."""
         total = cls._cache_stats['hits'] + cls._cache_stats['misses']
         tasa_hit = (cls._cache_stats['hits'] / total * 100) if total > 0 else 0
-        
+
         return {
             'total_iconos_cacheados': len(cls._icon_cache),
             'total_recortes_cacheados': len(cls._recorte_cache),
@@ -94,195 +79,159 @@ class NodoItem(QGraphicsObject):
             'tasa_hit': f"{tasa_hit:.1f}%"
         }
 
-    def _cargar_iconos_con_cache(self):
-        """Carga TODOS los iconos usando cache/memoización."""
-        try:
-            # Tamaño objetivo para los iconos
-            icon_target_size = int(self.size * self.ICON_SCALE)
-            
-            # Base directory para los iconos
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            icon_dir = os.path.join(base_dir, "Static", "Icons")
-            
-            # Cargar cada icono desde cache o procesarlo una sola vez
-            self._cargar_pixmap = self._obtener_icono_cacheado("cargar", icon_dir, icon_target_size)
-            self._descargar_pixmap = self._obtener_icono_cacheado("descargar", icon_dir, icon_target_size)
-            self._cargador_pixmap = self._obtener_icono_cacheado("bateria", icon_dir, icon_target_size)
-            self._cargador_io_pixmap = self._obtener_icono_cacheado("cargadorIO", icon_dir, icon_target_size)
-            
-        except Exception as e:
-            print(f"Error cargando iconos con cache: {e}")
-
-    def _obtener_icono_cacheado(self, nombre: str, icon_dir: str, target_size: int):
-        """
-        Obtiene un icono del cache. Si no existe, lo carga, procesa y guarda en cache.
-        Esta es la función clave de memoización.
-        """
-        # 1. Encontrar la mejor ruta para el icono (operación ligera)
-        ruta_icono = self._encontrar_mejor_ruta_icono(nombre, icon_dir, target_size)
-        if not ruta_icono:
-            return None
-        
-        # 2. Crear clave única para el cache
-        clave_cache = (target_size, nombre, ruta_icono)
-        
-        # 3. Verificar si ya está en cache (PROGRAMACIÓN DINÁMICA)
-        if clave_cache in self.__class__._icon_cache:
-            self.__class__._cache_stats['hits'] += 1
-            return self.__class__._icon_cache[clave_cache]
-        
-        # 4. No está en cache, hay que procesarlo (solo una vez)
-        self.__class__._cache_stats['misses'] += 1
-        
-        # 5. Cargar y procesar el icono
-        pixmap = self._cargar_y_procesar_icono(ruta_icono, target_size)
-        
-        # 6. Guardar en cache para futuras reutilizaciones
-        if pixmap:
-            self.__class__._icon_cache[clave_cache] = pixmap
-        
-        return pixmap
-
-    def _encontrar_mejor_ruta_icono(self, nombre: str, icon_dir: str, target_size: int):
-        """
-        Encuentra la mejor ruta para un icono basado en tamaños preferidos.
-        Esta función no necesita cache porque solo hace operaciones de filesystem.
-        """
-        # Tamaños preferidos en orden de prioridad
-        preferred_sizes = [
-            target_size * 4,   # Muy grande, escalará hacia abajo con buena calidad
-            target_size * 2,   # Buen balance calidad/rendimiento
-            target_size,       # Tamaño exacto, sin escalado
-            128, 64, 32        # Tamaños estándar de iconos
-        ]
-        
-        # 1. Buscar en directorios específicos de tamaño
-        for size in preferred_sizes:
-            specific_dir = os.path.join(icon_dir, f"{size}x{size}")
-            specific_path = os.path.join(specific_dir, f"{nombre}.png")
-            if os.path.exists(specific_path):
-                return specific_path
-        
-        # 2. Buscar archivos con tamaño en el nombre
-        for size in preferred_sizes:
-            sized_path = os.path.join(icon_dir, f"{nombre}_{size}x{size}.png")
-            if os.path.exists(sized_path):
-                return sized_path
-        
-        # 3. Buscar en la raíz del directorio de iconos
-        root_path = os.path.join(icon_dir, f"{nombre}.png")
-        if os.path.exists(root_path):
-            return root_path
-        
-        # 4. No se encontró el icono
-        print(f"⚠  Icono '{nombre}' no encontrado en {icon_dir}")
-        return None
-
-    # ============================================================
-    # VERSIÓN OPTIMIZADA DEL RECORTE CON CACHE
-    # ============================================================
+    # -------------------------------------------------------------------------
+    # RECORTE Y NORMALIZACIÓN DE ICONOS 
+    # -------------------------------------------------------------------------
 
     def _recortar_contenido_optimizado(self, image: QImage, ruta_imagen: str = ""):
         """
-        Recorta automáticamente el área donde hay píxeles no transparentes.
-        Versión optimizada con cache.
+        Recorta el contenido útil del icono ignorando sombras suaves y bordes semitransparentes.
+        Esto garantiza que todos los iconos tengan el MISMO tamaño visual.
         """
-        # Si tenemos ruta y ya está en cache, devolver del cache
+
         if ruta_imagen and ruta_imagen in self.__class__._recorte_cache:
             return self.__class__._recorte_cache[ruta_imagen]
-        
+
         w = image.width()
         h = image.height()
-        
+
         min_x, min_y = w, h
         max_x, max_y = 0, 0
-        
-        # OPTIMIZACIÓN: Recorrer píxeles pero con pasos para iconos grandes
-        step = 2 if w * h > 10000 else 1  # Salto de 2 píxeles para imágenes grandes
-        
-        for y in range(0, h, step):
-            for x in range(0, w, step):
-                if image.pixelColor(x, y).alpha() > 0:
-                    if x < min_x:
-                        min_x = x
-                    if y < min_y:
-                        min_y = y
-                    if x > max_x:
-                        max_x = x
-                    if y > max_y:
-                        max_y = y
-        
-        # Si no hay píxeles visibles, devolver la imagen original
+
+        ALPHA_THRESHOLD = 50  # Ignorar sombras suaves
+
+        for y in range(h):
+            for x in range(w):
+                if image.pixelColor(x, y).alpha() > ALPHA_THRESHOLD:
+                    min_x = min(min_x, x)
+                    min_y = min(min_y, y)
+                    max_x = max(max_x, x)
+                    max_y = max(max_y, y)
+
         if min_x > max_x or min_y > max_y:
             resultado = image
         else:
-            # Ajustar para incluir todos los píxeles (compensar el step)
-            if step > 1:
-                min_x = max(0, min_x - step)
-                min_y = max(0, min_y - step)
-                max_x = min(w - 1, max_x + step)
-                max_y = min(h - 1, max_y + step)
-            
+            padding = int(min(w, h) * 0.05)
+            min_x = max(0, min_x - padding)
+            min_y = max(0, min_y - padding)
+            max_x = min(w - 1, max_x + padding)
+            max_y = min(h - 1, max_y + padding)
+
             resultado = image.copy(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)
-        
-        # Guardar en cache si tenemos ruta
+
         if ruta_imagen:
             self.__class__._recorte_cache[ruta_imagen] = resultado
-        
+
         return resultado
 
     def _cargar_y_procesar_icono(self, ruta: str, target_size: int):
-        """
-        Carga y procesa un icono. Esta función solo se ejecuta UNA VEZ por combinación única.
-        Incluye recorte de espacios transparentes para uniformidad.
-        """
         if not os.path.exists(ruta):
             return None
-        
-        # Cargar imagen
+
         image = QImage(ruta)
         if image.isNull():
-            print(f"  ⚠  No se pudo cargar imagen: {ruta}")
+            print(f"⚠ No se pudo cargar imagen: {ruta}")
             return None
-        
-        # Convertir a formato ARGB32 si es necesario
+
         if image.format() != QImage.Format_ARGB32:
             image = image.convertToFormat(QImage.Format_ARGB32)
-        
-        # 1. RECORTAR contenido real (eliminar espacios transparentes)
-        # Esto asegura que todos los iconos tengan proporciones similares
+
         recortada = self._recortar_contenido_optimizado(image, ruta)
-        
-        # 2. Escalar manteniendo proporción
-        # Asegurar que la imagen recortada quepa dentro de target_size x target_size
+
         scaled = recortada.scaled(
             target_size,
             target_size,
             Qt.KeepAspectRatio,
             Qt.SmoothTransformation
         )
-        
-        # 3. Crear canvas cuadrado del tamaño exacto
+
         canvas = QImage(target_size, target_size, QImage.Format_ARGB32)
         canvas.fill(Qt.transparent)
-        
+
         painter = QPainter(canvas)
         painter.setRenderHints(
             QPainter.Antialiasing |
             QPainter.SmoothPixmapTransform
         )
-        
-        # Centrar la imagen escalada en el canvas
+
         x = (target_size - scaled.width()) // 2
         y = (target_size - scaled.height()) // 2
         painter.drawImage(x, y, scaled)
         painter.end()
-        
+
         return QPixmap.fromImage(canvas)
 
-    # ============================================================
-    # LÓGICA DE VISUALIZACIÓN (sin cambios)
-    # ============================================================
+    def _cargar_iconos_con_cache(self):
+        try:
+            margin = 10
+            extra_margin = 10
+
+            icon_target_size = self.size + 2*extra_margin - 2*margin
+
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            icon_dir = os.path.join(base_dir, "Static", "Icons")
+
+            self._cargar_pixmap = self._obtener_icono_cacheado("cargar", icon_dir, icon_target_size)
+            self._descargar_pixmap = self._obtener_icono_cacheado("descargar", icon_dir, icon_target_size)
+            self._cargador_pixmap = self._obtener_icono_cacheado("bateria", icon_dir, icon_target_size)
+            self._cargador_io_pixmap = self._obtener_icono_cacheado("cargadorIO", icon_dir, icon_target_size)
+
+        except Exception as e:
+            print(f"Error cargando iconos con cache: {e}")
+
+    # -------------------------------------------------------------------------
+    # RESTO DE TU CÓDIGO ORIGINAL
+    # -------------------------------------------------------------------------
+
+    def _obtener_icono_cacheado(self, nombre: str, icon_dir: str, target_size: int):
+        ruta_icono = self._encontrar_mejor_ruta_icono(nombre, icon_dir, target_size)
+        if not ruta_icono:
+            return None
+
+        clave_cache = (target_size, nombre, ruta_icono)
+
+        if clave_cache in self.__class__._icon_cache:
+            self.__class__._cache_stats['hits'] += 1
+            return self.__class__._icon_cache[clave_cache]
+
+        self.__class__._cache_stats['misses'] += 1
+
+        pixmap = self._cargar_y_procesar_icono(ruta_icono, target_size)
+
+        if pixmap:
+            self.__class__._icon_cache[clave_cache] = pixmap
+
+        return pixmap
+
+    def _encontrar_mejor_ruta_icono(self, nombre: str, icon_dir: str, target_size: int):
+        preferred_sizes = [
+            target_size * 4,
+            target_size * 2,
+            target_size,
+            128, 64, 32
+        ]
+
+        for size in preferred_sizes:
+            specific_dir = os.path.join(icon_dir, f"{size}x{size}")
+            specific_path = os.path.join(specific_dir, f"{nombre}.png")
+            if os.path.exists(specific_path):
+                return specific_path
+
+        for size in preferred_sizes:
+            sized_path = os.path.join(icon_dir, f"{nombre}_{size}x{size}.png")
+            if os.path.exists(sized_path):
+                return sized_path
+
+        root_path = os.path.join(icon_dir, f"{nombre}.png")
+        if os.path.exists(root_path):
+            return root_path
+
+        print(f"⚠  Icono '{nombre}' no encontrado en {icon_dir}")
+        return None
+
+    # -------------------------------------------------------------------------
+    # VISUALIZACIÓN Y EVENTOS
+    # -------------------------------------------------------------------------
 
     def _determinar_visualizacion(self):
         if self.es_cargador != 0:
@@ -310,10 +259,6 @@ class NodoItem(QGraphicsObject):
         self.texto = str(self.nodo.get('id', ''))
         self.con_horquilla = True
 
-    # ============================================================
-    # DIBUJADO (versión que funciona con proporciones uniformes)
-    # ============================================================
-
     def boundingRect(self):
         extra_margin = 10
         return QRectF(-extra_margin, -extra_margin,
@@ -336,13 +281,7 @@ class NodoItem(QGraphicsObject):
         painter.translate(-self.size / 2, -self.size / 2)
 
         if self.mostrar_icono and self.icono_actual:
-            # El icono ya está procesado: recortado y escalado a target_size x target_size
-            # Lo dibujamos con un tamaño proporcional al nodo
-            
-            # Tamaño del icono basado en ICON_SCALE
-            icon_size = int(self.size * self.ICON_SCALE)
-            
-            # Centrar el icono en el nodo
+            icon_size = self.icono_actual.width()
             x = (self.size - icon_size) / 2
             y = (self.size - icon_size) / 2
 
@@ -388,10 +327,17 @@ class NodoItem(QGraphicsObject):
         if self.isSelected():
             painter.setBrush(Qt.NoBrush)
             painter.setPen(QPen(self.color_selected, 3))
-            painter.drawEllipse(self.boundingRect().adjusted(margin + 2, margin + 2,
-                                                             -margin - 2, -margin - 2))
+            if self.mostrar_icono:
+                icon_size = self.icono_actual.width()
+                x = (self.size - icon_size) / 2
+                y = (self.size - icon_size) / 2
+                painter.drawEllipse(QRectF(x, y, icon_size, icon_size))
+            else:
+                painter.drawEllipse(self.boundingRect().adjusted(margin + 2, margin + 2,
+                                                                 -margin - 2, -margin - 2))
 
         painter.restore()
+
         
     def set_selected_color(self):
         """Cambia al color de selección (borde blanco)"""
@@ -604,27 +550,3 @@ class NodoItem(QGraphicsObject):
             self.hover_leaved.emit(self)
         
         super().hoverLeaveEvent(event)
-
-
-# ============================================================
-# FUNCIÓN DE DEBUG PARA VERIFICAR EL CACHE
-# ============================================================
-
-def verificar_cache_nodoitem():
-    """Función de utilidad para verificar el estado del cache."""
-    stats = NodoItem.obtener_estadisticas_cache()
-    print("\n" + "="*50)
-    print("ESTADÍSTICAS DE CACHE NodoItem")
-    print("="*50)
-    for key, value in stats.items():
-        print(f"{key:30}: {value}")
-    print("="*50)
-    
-    # Mostrar qué iconos están en cache
-    print("\nIconos en cache:")
-    for clave in NodoItem._icon_cache.keys():
-        target_size, nombre, ruta = clave
-        pixmap = NodoItem._icon_cache[clave]
-        print(f"  • {nombre:15} tamaño:{target_size:4}px, dimensiones: {pixmap.width()}x{pixmap.height()}")
-    
-    return stats
