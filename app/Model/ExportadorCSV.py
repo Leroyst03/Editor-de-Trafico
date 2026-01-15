@@ -6,7 +6,10 @@ class ExportadorCSV:
     @staticmethod
     def exportar(proyecto, view, escala=0.05):
         """
-        Exporta el proyecto a dos archivos CSV: nodos.csv y rutas.csv.
+        Exporta el proyecto a tres archivos CSV: 
+        - puntos.csv: propiedades básicas de todos los nodos
+        - rutas.csv: información de las rutas
+        - objetivos.csv: propiedades avanzadas de nodos con objetivo != 0
         Las coordenadas se exportan en metros usando la escala proporcionada.
         """
         if not proyecto:
@@ -21,21 +24,25 @@ class ExportadorCSV:
         if not carpeta:
             return  # El usuario canceló
 
-        # Ruta para el archivo de nodos
-        ruta_nodos = os.path.join(carpeta, "nodos.csv")
-        # Ruta para el archivo de rutas
+        # Rutas para los archivos
+        ruta_puntos = os.path.join(carpeta, "puntos.csv")
         ruta_rutas = os.path.join(carpeta, "rutas.csv")
+        ruta_objetivos = os.path.join(carpeta, "objetivos.csv")
 
         try:
-            # --- Exportar nodos ---
-            with open(ruta_nodos, 'w', newline='', encoding='utf-8') as archivo_nodos:
-                campos_nodos = [
+            # Contadores para estadísticas
+            nodos_con_objetivo = 0
+            nodos_total = len(proyecto.nodos)
+            
+            # --- Exportar puntos (nodos básicos) ---
+            with open(ruta_puntos, 'w', newline='', encoding='utf-8') as archivo_puntos:
+                campos_puntos = [
                     'id', 'X', 'Y', 'objetivo', 'A', 'Vmax', 'Seguridad', 
                     'Seg_alto', 'Seg_tresD', 'Tipo_curva', 'Reloc', 
                     'decision', 'timeout', 'ultimo_metro', 'es_cargador', 
                     'Puerta_Abrir', 'Puerta_Cerrar', 'Punto_espera', 'es_curva'
                 ]
-                escritor_csv = csv.DictWriter(archivo_nodos, fieldnames=campos_nodos)
+                escritor_csv = csv.DictWriter(archivo_puntos, fieldnames=campos_puntos)
                 escritor_csv.writeheader()
 
                 for nodo in proyecto.nodos:
@@ -51,7 +58,7 @@ class ExportadorCSV:
                     x_m = x_px * escala
                     y_m = y_px * escala
 
-                    # Preparar fila con todos los campos
+                    # Preparar fila con todos los campos básicos
                     fila = {
                         'id': datos.get('id'),
                         'X': x_m,
@@ -74,6 +81,50 @@ class ExportadorCSV:
                         'es_curva': datos.get('es_curva', 0)
                     }
                     escritor_csv.writerow(fila)
+            
+            # --- Exportar objetivos (propiedades avanzadas) ---
+            with open(ruta_objetivos, 'w', newline='', encoding='utf-8') as archivo_objetivos:
+                campos_objetivos = [
+                    'nodo_id', 'objetivo', 'Pasillo', 'Estanteria', 'Altura',
+                    'Altura_en_mm', 'Punto_Pasillo', 'Punto_Escara', 'Punto_desapr',
+                    'FIFO', 'Nombre', 'Presicion', 'Ir_a_desicion', 'numero_playa',
+                    'tipo_carga_descarga'
+                ]
+                escritor_csv = csv.DictWriter(archivo_objetivos, fieldnames=campos_objetivos)
+                escritor_csv.writeheader()
+
+                for nodo in proyecto.nodos:
+                    # Obtener datos del nodo
+                    if hasattr(nodo, 'to_dict'):
+                        datos = nodo.to_dict()
+                    else:
+                        datos = nodo
+                    
+                    objetivo = datos.get('objetivo', 0)
+                    
+                    # Solo exportar nodos con objetivo != 0
+                    if objetivo != 0:
+                        nodos_con_objetivo += 1
+                        
+                        # Preparar fila con todas las propiedades avanzadas
+                        fila = {
+                            'nodo_id': datos.get('id'),
+                            'objetivo': objetivo,
+                            'Pasillo': datos.get('Pasillo', 0),
+                            'Estanteria': datos.get('Estanteria', 0),
+                            'Altura': datos.get('Altura', 0),
+                            'Altura_en_mm': datos.get('Altura_en_mm', 0),
+                            'Punto_Pasillo': datos.get('Punto_Pasillo', 0),
+                            'Punto_Escara': datos.get('Punto_Escara', 0),
+                            'Punto_desapr': datos.get('Punto_desapr', 0),
+                            'FIFO': datos.get('FIFO', 0),
+                            'Nombre': datos.get('Nombre', ''),
+                            'Presicion': datos.get('Presicion', 0),
+                            'Ir_a_desicion': datos.get('Ir_a_desicion', 0),
+                            'numero_playa': datos.get('numero_playa', 0),
+                            'tipo_carga_descarga': datos.get('tipo_carga_descarga', 0)
+                        }
+                        escritor_csv.writerow(fila)
 
             # --- Exportar rutas ---
             with open(ruta_rutas, 'w', newline='', encoding='utf-8') as archivo_rutas:
@@ -117,11 +168,14 @@ class ExportadorCSV:
                         'visitados': visitados_str
                     })
 
+            # Mostrar mensaje de éxito con estadísticas
             QMessageBox.information(
                 view, 
                 "Exportación a CSV completada", 
-                f"Se han exportado {len(proyecto.nodos)} nodos y {len(proyecto.rutas)} rutas.\n"
-                f"Archivos creados:\n• {ruta_nodos}\n• {ruta_rutas}\n\n"
+                f"Se han exportado:\n"
+                f"• {nodos_total} nodos a {ruta_puntos}\n"
+                f"• {nodos_con_objetivo} nodos con objetivo a {ruta_objetivos}\n"
+                f"• {len(proyecto.rutas)} rutas a {ruta_rutas}\n\n"
                 f"Coordenadas exportadas en METROS (escala: {escala})"
             )
 

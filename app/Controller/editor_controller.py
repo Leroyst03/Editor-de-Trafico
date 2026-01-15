@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (
     QFileDialog, QGraphicsScene, QGraphicsPixmapItem,
     QButtonGroup, QListWidgetItem,
-    QTableWidgetItem, QHeaderView, QMenu, QMessageBox, QLabel
+    QTableWidgetItem, QHeaderView, QMenu, QMessageBox, QDialog
 )
 from PyQt5.QtGui import QPixmap, QPen, QCursor
 from PyQt5.QtCore import Qt, QEvent, QObject, QSize
@@ -1919,13 +1919,6 @@ class EditorController(QObject):
     def crear_nodo(self, x=100, y=100, registrar_historial=True):
         """
         Crea un nuevo nodo en las coordenadas especificadas.
-        
-        Args:
-            x, y: Coordenadas en píxeles
-            registrar_historial: Si True, registra la creación en el historial UNDO/REDO
-            
-        Returns:
-            NodoItem: El nodo visual creado (o None si falló)
         """
         if not self.proyecto:
             print("No hay proyecto cargado")
@@ -1944,11 +1937,13 @@ class EditorController(QObject):
                     nodo["objetivo"] = 0
                 if "es_cargador" not in nodo:
                     nodo["es_cargador"] = 0
+                # Las propiedades de objetivo ya están inicializadas en agregar_nodo
             elif hasattr(nodo, "objetivo"):
                 pass  # Ya tiene el atributo
             else:
                 setattr(nodo, "objetivo", 0)
                 setattr(nodo, "es_cargador", 0)
+                # Las propiedades de objetivo se inicializarán cuando se necesiten
 
             # Crear NodoItem con referencia al editor usando helper centralizado
             try:
@@ -2963,11 +2958,13 @@ class EditorController(QObject):
         if self._updating_ui:
             return
         self._updating_ui = True
+
         try:
             try:
                 self.view.propertiesTable.itemChanged.disconnect(self._actualizar_propiedad_nodo)
             except Exception:
                 pass
+            
             self.view.propertiesTable.blockSignals(True)
 
             self.view.propertiesTable.clear()
@@ -2975,10 +2972,26 @@ class EditorController(QObject):
             self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
 
             propiedades = nodo.to_dict() if hasattr(nodo, "to_dict") else nodo
-            claves_filtradas = [k for k in propiedades.keys() if k != "id"]
+            
+            # Filtrar propiedades básicas (excluyendo las de objetivo)
+            propiedades_basicas = ["X", "Y", "A", "Vmax", "Seguridad", "Seg_alto", 
+                                "Seg_tresD", "Tipo_curva", "Reloc", "objetivo", 
+                                "decision", "timeout", "ultimo_metro", "es_cargador",
+                                "Puerta_Abrir", "Puerta_Cerrar", "Punto_espera", "es_curva"]
+            
+            # Filtrar también las propiedades de objetivo para no mostrarlas aquí
+            claves_filtradas = [k for k in propiedades_basicas if k in propiedades]
 
-            self.view.propertiesTable.setRowCount(len(claves_filtradas))
+            # Si el nodo tiene objetivo != 0, añadimos espacio para el botón
+            objetivo = propiedades.get("objetivo", 0)
+            if objetivo != 0:
+                total_filas = len(claves_filtradas) + 2  # +1 para separador, +1 para botón
+            else:
+                total_filas = len(claves_filtradas)
+            
+            self.view.propertiesTable.setRowCount(total_filas)
 
+            # Mostrar propiedades básicas
             for row, clave in enumerate(claves_filtradas):
                 valor = propiedades.get(clave)
                 
@@ -2994,39 +3007,86 @@ class EditorController(QObject):
                 val_item.setFlags(val_item.flags() | Qt.ItemIsEditable)
                 val_item.setData(Qt.UserRole, (nodo, clave))
                 self.view.propertiesTable.setItem(row, 1, val_item)
+            
+            # Si el nodo tiene objetivo != 0, añadir un botón para editar propiedades avanzadas
+            if objetivo != 0:
+                fila_separador = len(claves_filtradas)
+                fila_boton = fila_separador + 1
+                
+                # Crear una fila separadora (opcional, pero mejora la visualización)
+                separator_item = QTableWidgetItem("")
+                separator_item.setFlags(Qt.NoItemFlags)
+                separator_item.setBackground(Qt.lightGray)
+                self.view.propertiesTable.setItem(fila_separador, 0, separator_item)
+                
+                # Crear una celda combinada para el separador
+                self.view.propertiesTable.setSpan(fila_separador, 0, 1, 2)
+                
+                # Crear un widget con un botón para propiedades avanzadas
+                from PyQt5.QtWidgets import QPushButton
+                boton = QPushButton("Propiedades Avanzadas...")
+                boton.setStyleSheet("""
+                    QPushButton {
+                        background-color: #4a4a4a;
+                        color: white;
+                        border: 1px solid #555555;
+                        border-radius: 3px;
+                        padding: 5px;
+                    }
+                    QPushButton:hover {
+                        background-color: #5a5a5a;
+                    }
+                """)
+                boton.clicked.connect(lambda: self._mostrar_dialogo_propiedades_objetivo(nodo))
+                
+                # Crear item para la etiqueta
+                label_item = QTableWidgetItem("Configuración Avanzada:")
+                label_item.setFlags(Qt.ItemIsEnabled)
+                self.view.propertiesTable.setItem(fila_boton, 0, label_item)
+                
+                # Colocar el botón en la columna de valor
+                self.view.propertiesTable.setCellWidget(fila_boton, 1, boton)
+                
         finally:
             self.view.propertiesTable.blockSignals(False)
             self.view.propertiesTable.itemChanged.connect(self._actualizar_propiedad_nodo)
         self._updating_ui = False
 
-    def actualizar_propiedades_valores(self, nodo, claves=("X", "Y")):
-        """
-        Actualiza en propertiesTable los valores de las claves indicadas para `nodo`
-        sin repoblar toda la tabla. Busca las celdas que tengan Qt.UserRole == (nodo, clave).
-        """
-        try:
-            for row in range(self.view.propertiesTable.rowCount()):
-                try:
-                    cell = self.view.propertiesTable.item(row, 1)
-                    if not cell:
-                        continue
-                    data = cell.data(Qt.UserRole)
-                    if not data or not isinstance(data, tuple):
-                        continue
-                    cell_nodo, cell_clave = data
-                    if cell_nodo == nodo and cell_clave in claves:
-                        try:
-                            val = nodo.get(cell_clave) if hasattr(nodo, "get") else getattr(nodo, cell_clave, "")
-                        except Exception:
-                            val = getattr(nodo, cell_clave, "")
-                        # Convertir a metros para mostrar
-                        if cell_clave in ["X", "Y"]:
-                            val = self.pixeles_a_metros(val)
-                        cell.setText(str(val))
-                except Exception:
-                    pass
-        except Exception as err:
-            print("Error en actualizar_propiedades_valores:", err)
+    def _mostrar_dialogo_propiedades_objetivo(self, nodo):
+        """Muestra el diálogo de propiedades de objetivo para un nodo"""
+        # Obtener las propiedades actuales del nodo
+        if hasattr(nodo, 'to_dict'):
+            propiedades_actuales = nodo.to_dict()
+        elif isinstance(nodo, dict):
+            propiedades_actuales = nodo
+        else:
+            propiedades_actuales = {}
+        
+        # Crear y mostrar el diálogo
+        from View.dialogo_propiedades_objetivo import DialogoPropiedadesObjetivo
+        dialogo = DialogoPropiedadesObjetivo(self.view, propiedades_actuales)
+        
+        if dialogo.exec_() == QDialog.Accepted:
+            # Obtener las propiedades del diálogo
+            nuevas_propiedades = dialogo.obtener_propiedades()
+            
+            # Registrar cada cambio individual en el historial
+            for clave, valor in nuevas_propiedades.items():
+                valor_anterior = propiedades_actuales.get(clave)
+                if valor_anterior is not None and valor_anterior != valor:
+                    self.registrar_cambio_propiedad_nodo(
+                        nodo.get('id'),
+                        clave,
+                        valor_anterior,
+                        valor
+                    )
+            
+            # Actualizar todas las propiedades a la vez
+            datos_actualizacion = {"id": nodo.get('id')}
+            datos_actualizacion.update(nuevas_propiedades)
+            self.proyecto.actualizar_nodo(datos_actualizacion)
+            
+            print(f"✓ Propiedades de objetivo actualizadas para nodo {nodo.get('id')}")
 
     def _actualizar_propiedad_nodo(self, item):
         """Actualiza la propiedad de un nodo a través del proyecto para notificar cambios"""
@@ -3047,6 +3107,51 @@ class EditorController(QObject):
         elif hasattr(nodo, clave):
             valor_anterior = getattr(nodo, clave)
         
+        # Detectar si estamos editando el campo "objetivo"
+        if clave == "objetivo":
+            try:
+                nuevo_objetivo = int(texto)
+                valor_anterior_int = int(valor_anterior) if valor_anterior is not None else 0
+                
+                # Solo proceder si realmente hay un cambio
+                if nuevo_objetivo != valor_anterior_int:
+                    # Registrar el cambio en historial
+                    if valor_anterior is not None:
+                        self.registrar_cambio_propiedad_nodo(
+                            nodo.get('id'), 
+                            clave, 
+                            valor_anterior, 
+                            nuevo_objetivo
+                        )
+                    
+                    # Actualizar el objetivo
+                    self.proyecto.actualizar_nodo({
+                        "id": nodo.get('id'),
+                        clave: nuevo_objetivo
+                    })
+                    
+                    # Si el objetivo cambia a un valor diferente de 0 (y antes era 0)
+                    # mostrar diálogo de propiedades de objetivo
+                    if nuevo_objetivo != 0 and valor_anterior_int == 0:
+                        # Pequeño delay para asegurar que la UI se actualice
+                        from PyQt5.QtCore import QTimer
+                        QTimer.singleShot(100, lambda: self._mostrar_dialogo_propiedades_objetivo(nodo))
+                    
+                    # Si el objetivo cambia de diferente de 0 a 0
+                    elif nuevo_objetivo == 0 and valor_anterior_int != 0:
+                        # No hacer nada especial, las propiedades avanzadas se mantienen pero no se muestran
+                        print(f"Objetivo cambiado a 0, propiedades avanzadas permanecen guardadas")
+                        
+                return  # Salir ya que hemos manejado el cambio de objetivo
+                    
+            except ValueError:
+                print(f"Error: objetivo debe ser un número entero")
+                # Restaurar el valor anterior
+                if valor_anterior is not None:
+                    item.setText(str(valor_anterior))
+                return
+        
+        # Para todas las demás propiedades, comportamiento normal
         try:
             # Intentar evaluar el valor (para números, listas, etc.)
             valor = ast.literal_eval(texto)
@@ -3095,7 +3200,7 @@ class EditorController(QObject):
                     "id": nodo.get('id'),
                     clave: valor
                 })
-                
+                    
         except Exception as err:
             print("Error actualizando nodo en el modelo:", err)
             
@@ -4926,16 +5031,20 @@ class EditorController(QObject):
             )
             return
 
+        nodos_con_objetivo = [n for n in self.proyecto.nodos if n.get("objetivo", 0) != 0]
+
         # Mostrar diálogo de confirmación
         confirmacion = QMessageBox.question(
             self.view,
             "Confirmar exportación a CSV",
             f"¿Exportar proyecto actual a CSV?\n\n"
             f"• Nodos: {len(self.proyecto.nodos)}\n"
-            f"• Rutas: {len(self.proyecto.rutas)}\n\n"
+            f"• Rutas: {len(self.proyecto.rutas)}\n"
+            f"• Nodos Objetivo: {len(nodos_con_objetivo)}\n\n"
             f"Se crearán dos archivos:\n"
             f"  - nodos.csv (todos los atributos de nodos)\n"
-            f"  - rutas.csv (IDs: origen, destino, visitados)\n\n"
+            f"  - rutas.csv (IDs: origen, destino, visitados)\n"
+            f"  - objetivo.csv (IDs y propiedades avanzadas)\n\n"
             f"Coordenadas exportadas en METROS (escala: {self.ESCALA})",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.Yes

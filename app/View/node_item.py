@@ -5,7 +5,7 @@ from Model.Nodo import Nodo
 import os
 
 class NodoItem(QGraphicsObject):
-    ICON_SCALE = 1.25
+    ICON_SCALE = 1.0
 
     _icon_cache = {}
     _recorte_cache = {}
