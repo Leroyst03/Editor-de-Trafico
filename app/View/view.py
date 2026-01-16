@@ -199,6 +199,9 @@ class EditorView(QMainWindow):
         # Cargar UI
         uic.loadUi(ui_file, self)
         
+        self.menuParametros = self.menuBar().addMenu("Parámetros")
+        #self.actionParametros = self.menuParametros.addAction("Configurar Parámetros...")
+
         # Sustituir el QGraphicsView por ZoomGraphicsView
         self.zoomView = ZoomGraphicsView(self)
         self.zoomView.setObjectName("marco_trabajo")

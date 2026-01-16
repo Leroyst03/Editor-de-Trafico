@@ -6,11 +6,7 @@ class ExportadorCSV:
     @staticmethod
     def exportar(proyecto, view, escala=0.05):
         """
-        Exporta el proyecto a tres archivos CSV: 
-        - puntos.csv: propiedades básicas de todos los nodos
-        - rutas.csv: información de las rutas
-        - objetivos.csv: propiedades avanzadas de nodos con objetivo != 0
-        Las coordenadas se exportan en metros usando la escala proporcionada.
+        Exporta el proyecto a archivos CSV.
         """
         if not proyecto:
             QMessageBox.warning(view, "Error", "No hay proyecto cargado.")
@@ -24,17 +20,13 @@ class ExportadorCSV:
         if not carpeta:
             return  # El usuario canceló
 
-        # Rutas para los archivos
-        ruta_puntos = os.path.join(carpeta, "puntos.csv")
-        ruta_rutas = os.path.join(carpeta, "rutas.csv")
-        ruta_objetivos = os.path.join(carpeta, "objetivos.csv")
-
         try:
             # Contadores para estadísticas
             nodos_con_objetivo = 0
             nodos_total = len(proyecto.nodos)
             
             # --- Exportar puntos (nodos básicos) ---
+            ruta_puntos = os.path.join(carpeta, "puntos.csv")
             with open(ruta_puntos, 'w', newline='', encoding='utf-8') as archivo_puntos:
                 campos_puntos = [
                     'id', 'X', 'Y', 'objetivo', 'A', 'Vmax', 'Seguridad', 
@@ -83,10 +75,11 @@ class ExportadorCSV:
                     escritor_csv.writerow(fila)
             
             # --- Exportar objetivos (propiedades avanzadas) ---
+            ruta_objetivos = os.path.join(carpeta, "objetivos.csv")
             with open(ruta_objetivos, 'w', newline='', encoding='utf-8') as archivo_objetivos:
                 campos_objetivos = [
                     'nodo_id', 'objetivo', 'Pasillo', 'Estanteria', 'Altura',
-                    'Altura_en_mm', 'Punto_Pasillo', 'Punto_Escara', 'Punto_desapr',
+                    'Altura_en_mm', 'Punto_Pasillo', 'Punto_encarar', 'Punto_desaproximar',
                     'FIFO', 'Nombre', 'Presicion', 'Ir_a_desicion', 'numero_playa',
                     'tipo_carga_descarga'
                 ]
@@ -115,8 +108,8 @@ class ExportadorCSV:
                             'Altura': datos.get('Altura', 0),
                             'Altura_en_mm': datos.get('Altura_en_mm', 0),
                             'Punto_Pasillo': datos.get('Punto_Pasillo', 0),
-                            'Punto_Escara': datos.get('Punto_Escara', 0),
-                            'Punto_desapr': datos.get('Punto_desapr', 0),
+                            'Punto_encarar': datos.get('Punto_Escara', 0),
+                            'Punto_desaproximar': datos.get('Punto_desapr', 0),
                             'FIFO': datos.get('FIFO', 0),
                             'Nombre': datos.get('Nombre', ''),
                             'Presicion': datos.get('Presicion', 0),
@@ -127,6 +120,7 @@ class ExportadorCSV:
                         escritor_csv.writerow(fila)
 
             # --- Exportar rutas ---
+            ruta_rutas = os.path.join(carpeta, "rutas.csv")
             with open(ruta_rutas, 'w', newline='', encoding='utf-8') as archivo_rutas:
                 campos_rutas = ['origen_id', 'destino_id', 'visitados']
                 escritor_csv = csv.DictWriter(archivo_rutas, fieldnames=campos_rutas)
@@ -167,6 +161,22 @@ class ExportadorCSV:
                         'destino_id': destino_id,
                         'visitados': visitados_str
                     })
+            
+            # +++ NUEVO: Exportar parámetros +++
+            ruta_parametros = os.path.join(carpeta, "parametros.csv")
+            parametros = getattr(proyecto, 'parametros', {})
+            
+            if parametros:
+                with open(ruta_parametros, 'w', newline='', encoding='utf-8') as archivo_parametros:
+                    campos = ['parametro', 'valor']
+                    escritor_csv = csv.DictWriter(archivo_parametros, fieldnames=campos)
+                    escritor_csv.writeheader()
+                    
+                    for nombre, valor in parametros.items():
+                        escritor_csv.writerow({
+                            'parametro': nombre,
+                            'valor': valor
+                        })
 
             # Mostrar mensaje de éxito con estadísticas
             QMessageBox.information(
@@ -175,7 +185,8 @@ class ExportadorCSV:
                 f"Se han exportado:\n"
                 f"• {nodos_total} nodos a {ruta_puntos}\n"
                 f"• {nodos_con_objetivo} nodos con objetivo a {ruta_objetivos}\n"
-                f"• {len(proyecto.rutas)} rutas a {ruta_rutas}\n\n"
+                f"• {len(proyecto.rutas)} rutas a {ruta_rutas}\n"
+                f"• {len(parametros)} parámetros a {ruta_parametros if parametros else 'No hay parámetros'}\n\n"
                 f"Coordenadas exportadas en METROS (escala: {escala})"
             )
 

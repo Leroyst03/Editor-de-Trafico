@@ -15,6 +15,28 @@ class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
         self.mapa = mapa
         self.nodos = nodos if nodos is not None else []
         self.rutas = rutas if rutas is not None else []
+        self.parametros = self._parametros_por_defecto()  # NUEVO: atributo parámetros
+
+    def _parametros_por_defecto(self):
+        """Devuelve los parámetros por defecto del sistema"""
+        return {
+            "G_AGV_ID": 2,
+            "G_thres_error_angle": 5,
+            "G_dist_larguero": 0,
+            "G_pulsos_por_grado_encoder": 15,
+            "G_LAT_OFF": 905,
+            "G_lateral_centro": 47,
+            "G_LAT_MAX": 1006,
+            "G_TACO_OFF": 76,
+            "G_ALT_OFF": 184,
+            "G_PUNTO_CARGADOR": 75,
+            "G_PUNTO_CARGADOR_": 75,
+            "G_offset_Lidar": 2,
+            "G_t_stop_aprox_big": 0,
+            "G_stop_r": 0,
+            "G_PAL_L_P_off": 0,
+            "G_PAL_A_P_off_peso": 0
+        }
 
     def agregar_nodo(self, x, y):
         """Crea un nodo con atributos iniciales y lo añade al proyecto."""
@@ -170,13 +192,14 @@ class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
         datos = {
             "mapa": self.mapa,
             "nodos": [n.to_dict() for n in self.nodos],
-            "rutas": rutas_con_nodos_completos  # Nodos completos
+            "rutas": rutas_con_nodos_completos,  # Nodos completos
+            "parametros": self.parametros  # NUEVO: incluir parámetros
         }
         
         with open(ruta_archivo, "w", encoding="utf-8") as f:
             json.dump(datos, f, indent=4, ensure_ascii=False)
         
-        print(f"✓ Proyecto guardado con {len(rutas_con_nodos_completos)} rutas (nodos completos)")
+        print(f"✓ Proyecto guardado con {len(rutas_con_nodos_completos)} rutas y {len(self.parametros)} parámetros")
 
     @classmethod
     def cargar(cls, ruta_archivo):
@@ -187,6 +210,13 @@ class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
         mapa = datos.get("mapa", "")
         nodos_data = datos.get("nodos", [])
         rutas_simplificadas = datos.get("rutas", [])
+        
+        # NUEVO: Cargar parámetros o usar por defecto
+        parametros = datos.get("parametros")
+        if parametros is None:
+            # Crear instancia temporal para obtener parámetros por defecto
+            proyecto_temp = cls()
+            parametros = proyecto_temp._parametros_por_defecto()
 
         # Convertir nodos del JSON en objetos Nodo
         nodos = [Nodo(nd) for nd in nodos_data]
@@ -245,8 +275,12 @@ class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
             
             rutas_completas.append(ruta_completa)
         
-        print(f"✓ Proyecto cargado: {len(nodos)} nodos, {len(rutas_completas)} rutas")
-        return cls(mapa, nodos, rutas_completas)
+        # Crear instancia del proyecto
+        proyecto = cls(mapa, nodos, rutas_completas)
+        proyecto.parametros = parametros  # NUEVO: asignar parámetros cargados
+        
+        print(f"✓ Proyecto cargado: {len(nodos)} nodos, {len(rutas_completas)} rutas, {len(parametros)} parámetros")
+        return proyecto
     
     def _update_routes_for_node(self, nodo_id):
         """

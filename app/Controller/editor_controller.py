@@ -49,12 +49,12 @@ class EditorController(QObject):
         abrir_action = self.view.menuProyecto.addAction("Abrir")
         guardar_action = self.view.menuProyecto.addAction("Guardar")
         
-        # --- NUEVO: Submenú Exportar ---
+        # --- Submenú Exportar ---
         self.view.menuProyecto.addSeparator()  # Separador visual
         exportar_sqlite_action = self.view.menuProyecto.addAction("Exportar a SQLite...")
         exportar_sqlite_action.triggered.connect(self.exportar_a_sqlite)
         
-        # --- NUEVO: Opción para exportar a CSV ---
+        # --- Opción para exportar a CSV ---
         exportar_csv_action = self.view.menuProyecto.addAction("Exportar a CSV...")
         exportar_csv_action.triggered.connect(self.exportar_a_csv)
 
@@ -66,6 +66,17 @@ class EditorController(QObject):
         self.mover_ctrl = MoverController(self.proyecto, self.view, self)
         self.colocar_ctrl = ColocarController(self.proyecto, self.view, self)
         self.ruta_ctrl = RutaController(self.proyecto, self.view, self)
+
+        #Menu parametros
+        # Verificar si el menú ya existe en la vista
+        if hasattr(self.view, 'menuParametros'):
+            action_parametros = self.view.menuParametros.addAction("Configurar Parámetros...")
+            action_parametros.triggered.connect(self.mostrar_dialogo_parametros)
+        else:
+            # Crear dinámicamente si no existe
+            self.view.menuParametros = self.view.menuBar().addMenu("Parámetros")
+            action_parametros = self.view.menuParametros.addAction("Configurar Parámetros...")
+            action_parametros.triggered.connect(self.mostrar_dialogo_parametros)
 
         # --- Grupo de botones de modo ---
         self.modo_group = QButtonGroup()
@@ -122,7 +133,7 @@ class EditorController(QObject):
         self.visibilidad_rutas = {}  # {ruta_index: visible} - Para líneas
         self.nodo_en_rutas = {}  # {nodo_id: [ruta_index1, ...]} - Relaciones originales
         
-        # NUEVO: Rutas reconstruidas para dibujo (excluyendo nodos ocultos)
+        # Rutas reconstruidas para dibujo (excluyendo nodos ocultos)
         self.rutas_para_dibujo = []  # Lista de rutas reconstruidas para dibujar
         
         # --- CAMBIO: Conectar botones de visibilidad como interruptores ---
@@ -410,6 +421,79 @@ class EditorController(QObject):
             self.view.btnMostrarTodo.setEnabled(True)  # Habilitado inicialmente
         
         print("✓ UI completamente limpiada para nuevo proyecto")
+
+    # +++ NUEVOS MÉTODOS PARA PARÁMETROS +++
+    def mostrar_dialogo_parametros(self):
+        """Muestra el diálogo de configuración de parámetros"""
+        from View.dialogo_parametros import DialogoParametros
+        
+        # Obtener parámetros actuales del proyecto
+        parametros_actuales = getattr(self.proyecto, 'parametros', None)
+        
+        dialogo = DialogoParametros(self.view, parametros_actuales)
+        
+        if dialogo.exec_() == QDialog.Accepted:
+            nuevos_parametros = dialogo.obtener_parametros()
+            
+            # Guardar en el proyecto
+            if not hasattr(self.proyecto, 'parametros'):
+                self.proyecto.parametros = {}
+            
+            self.proyecto.parametros = nuevos_parametros
+            
+            print("Parámetros guardados:", nuevos_parametros)
+            QMessageBox.information(self.view, "Parámetros", 
+                                  "Parámetros guardados correctamente.")
+    
+    # Modificar el método exportar_a_csv para incluir parámetros
+    def exportar_a_csv(self):
+        """Exporta el proyecto actual a archivos CSV separados."""
+        if not self.proyecto:
+            QMessageBox.warning(
+                self.view,
+                "No hay proyecto",
+                "Debes crear o abrir un proyecto primero."
+            )
+            return
+
+        # Verificar que hay datos para exportar
+        if not self.proyecto.nodos and not self.proyecto.rutas:
+            QMessageBox.warning(
+                self.view,
+                "Proyecto vacío",
+                "El proyecto no contiene nodos ni rutas para exportar."
+            )
+            return
+
+        nodos_con_objetivo = [n for n in self.proyecto.nodos if n.get("objetivo", 0) != 0]
+        
+        # Obtener parámetros si existen
+        parametros = getattr(self.proyecto, 'parametros', {})
+        tiene_parametros = bool(parametros)
+
+        # Mostrar diálogo de confirmación actualizado
+        confirmacion = QMessageBox.question(
+            self.view,
+            "Confirmar exportación a CSV",
+            f"¿Exportar proyecto actual a CSV?\n\n"
+            f"• Nodos: {len(self.proyecto.nodos)}\n"
+            f"• Rutas: {len(self.proyecto.rutas)}\n"
+            f"• Nodos Objetivo: {len(nodos_con_objetivo)}\n"
+            f"• Parámetros: {len(parametros)} parámetros\n\n"
+            f"Se crearán {'cuatro' if tiene_parametros else 'tres'} archivos:\n"
+            f"  - puntos.csv (todos los atributos de nodos)\n"
+            f"  - rutas.csv (IDs: origen, destino, visitados)\n"
+            f"  - objetivos.csv (IDs y propiedades avanzadas)\n"
+            f"{'  - parametros.csv (parámetros del sistema)' if tiene_parametros else ''}\n\n"
+            f"Coordenadas exportadas en METROS (escala: {self.ESCALA})",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+
+        if confirmacion == QMessageBox.Yes:
+            # Llamar al exportador CSV pasando la escala
+            ExportadorCSV.exportar(self.proyecto, self.view, self.ESCALA)
+
 
     # --- Gestión de modos ---
     def cambiar_modo(self, boton):
@@ -4973,7 +5057,7 @@ class EditorController(QObject):
         return None
 
     # --- NUEVO MÉTODO PARA EXPORTACIÓN SQLITE ---
-    
+
     def exportar_a_sqlite(self):
         """Exporta el proyecto actual a bases de datos SQLite separadas."""
         if not self.proyecto:
@@ -4993,16 +5077,25 @@ class EditorController(QObject):
             )
             return
         
-        # Mostrar diálogo de confirmación
+        # Obtener estadísticas
+        nodos_con_objetivo = [n for n in self.proyecto.nodos if n.get("objetivo", 0) != 0]
+        parametros = getattr(self.proyecto, 'parametros', {})
+        tiene_parametros = bool(parametros)
+        
+        # Mostrar diálogo de confirmación ACTUALIZADO
         confirmacion = QMessageBox.question(
             self.view,
-            "Confirmar exportación",
-            f"¿Exportar proyecto actual?\n\n"
+            "Confirmar exportación a SQLite",
+            f"¿Exportar proyecto actual a SQLite?\n\n"
             f"• Nodos: {len(self.proyecto.nodos)}\n"
-            f"• Rutas: {len(self.proyecto.rutas)}\n\n"
-            f"Se crearán dos archivos:\n"
+            f"• Rutas: {len(self.proyecto.rutas)}\n"
+            f"• Nodos Objetivo: {len(nodos_con_objetivo)}\n"
+            f"• Parámetros: {len(parametros)} parámetros\n\n"
+            f"Se crearán {'cuatro' if tiene_parametros else 'tres'} archivos:\n"
             f"  - nodos.db (todos los atributos de nodos)\n"
-            f"  - rutas.db (IDs: origen, destino, visitados)\n\n"
+            f"  - rutas.db (IDs: origen, destino, visitados)\n"
+            f"  - objetivos.db (nodos con objetivo != 0)\n"
+            f"{'  - parametros.db (parámetros del sistema)' if tiene_parametros else ''}\n\n"
             f"Coordenadas exportadas en METROS (escala: {self.ESCALA})",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.Yes

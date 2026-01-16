@@ -6,7 +6,11 @@ class ExportadorDB:
     @staticmethod
     def exportar(proyecto, view, escala=0.05):
         """
-        Exporta el proyecto a dos bases de datos SQLite: nodos.db y rutas.db.
+        Exporta el proyecto a cuatro bases de datos SQLite:
+        - nodos.db: propiedades básicas de todos los nodos
+        - objetivos.db: propiedades avanzadas de nodos con objetivo != 0
+        - rutas.db: información de las rutas
+        - parametros.db: parámetros del sistema
         Las coordenadas se exportan en metros usando la escala proporcionada.
         """
         if not proyecto:
@@ -21,13 +25,14 @@ class ExportadorDB:
         if not carpeta:
             return  # El usuario canceló
 
-        # Ruta para la base de datos de nodos
+        # Rutas para las bases de datos
         ruta_nodos = os.path.join(carpeta, "nodos.db")
-        # Ruta para la base de datos de rutas
+        ruta_objetivos = os.path.join(carpeta, "objetivos.db")
         ruta_rutas = os.path.join(carpeta, "rutas.db")
+        ruta_parametros = os.path.join(carpeta, "parametros.db")
 
         try:
-            # --- Exportar nodos ---
+            # --- Exportar nodos (puntos básicos) ---
             conn_nodos = sqlite3.connect(ruta_nodos)
             cursor_nodos = conn_nodos.cursor()
             
@@ -96,11 +101,74 @@ class ExportadorDB:
                     datos.get('Puerta_Abrir', 0),
                     datos.get('Puerta_Cerrar', 0),
                     datos.get('Punto_espera', 0),
-                    datos.get('es_curva', 0)  # <-- AQUÍ ESTÁ LA CORRECCIÓN: se añade este valor
+                    datos.get('es_curva', 0)
                 ))
             
             conn_nodos.commit()
             conn_nodos.close()
+            
+            # --- Exportar objetivos (propiedades avanzadas) ---
+            # Contar nodos con objetivo
+            nodos_con_objetivo = [n for n in proyecto.nodos if n.get("objetivo", 0) != 0]
+            
+            if nodos_con_objetivo:
+                conn_objetivos = sqlite3.connect(ruta_objetivos)
+                cursor_objetivos = conn_objetivos.cursor()
+                
+                # Crear tabla de objetivos
+                cursor_objetivos.execute("""
+                    CREATE TABLE IF NOT EXISTS objetivos (
+                        nodo_id INTEGER PRIMARY KEY,
+                        objetivo INTEGER,
+                        Pasillo INTEGER,
+                        Estanteria INTEGER,
+                        Altura INTEGER,
+                        Altura_en_mm INTEGER,
+                        Punto_Pasillo INTEGER,
+                        Punto_encarar INTEGER,
+                        Punto_desaproximar INTEGER,
+                        FIFO INTEGER,
+                        Nombre TEXT,
+                        Presicion INTEGER,
+                        Ir_a_desicion INTEGER,
+                        numero_playa INTEGER,
+                        tipo_carga_descarga INTEGER
+                    )
+                """)
+                
+                # Insertar objetivos
+                for nodo in nodos_con_objetivo:
+                    if hasattr(nodo, 'to_dict'):
+                        datos = nodo.to_dict()
+                    else:
+                        datos = nodo
+                    
+                    cursor_objetivos.execute("""
+                        INSERT INTO objetivos (nodo_id, objetivo, Pasillo, Estanteria, Altura,
+                                            Altura_en_mm, Punto_Pasillo, Punto_encarar, 
+                                            Punto_desaproximar, FIFO, Nombre, Presicion,
+                                            Ir_a_desicion, numero_playa, tipo_carga_descarga)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        datos.get('id'),
+                        datos.get('objetivo', 0),
+                        datos.get('Pasillo', 0),
+                        datos.get('Estanteria', 0),
+                        datos.get('Altura', 0),
+                        datos.get('Altura_en_mm', 0),
+                        datos.get('Punto_Pasillo', 0),
+                        datos.get('Punto_Escara', 0),  # Mapeado a Punto_encarar
+                        datos.get('Punto_desapr', 0),  # Mapeado a Punto_desaproximar
+                        datos.get('FIFO', 0),
+                        datos.get('Nombre', ''),
+                        datos.get('Presicion', 0),
+                        datos.get('Ir_a_desicion', 0),
+                        datos.get('numero_playa', 0),
+                        datos.get('tipo_carga_descarga', 0)
+                    ))
+                
+                conn_objetivos.commit()
+                conn_objetivos.close()
             
             # --- Exportar rutas ---
             conn_rutas = sqlite3.connect(ruta_rutas)
@@ -155,11 +223,51 @@ class ExportadorDB:
             conn_rutas.commit()
             conn_rutas.close()
             
+            # +++ NUEVO: Exportar parámetros +++
+            parametros = getattr(proyecto, 'parametros', {})
+            if parametros:
+                conn_parametros = sqlite3.connect(ruta_parametros)
+                cursor_parametros = conn_parametros.cursor()
+                
+                # Crear tabla de parámetros
+                cursor_parametros.execute("""
+                    CREATE TABLE IF NOT EXISTS parametros (
+                        parametro TEXT PRIMARY KEY,
+                        valor TEXT
+                    )
+                """)
+                
+                # Insertar parámetros
+                for nombre, valor in parametros.items():
+                    cursor_parametros.execute("""
+                        INSERT INTO parametros (parametro, valor)
+                        VALUES (?, ?)
+                    """, (nombre, str(valor)))
+                
+                conn_parametros.commit()
+                conn_parametros.close()
+            
+            # Mostrar mensaje de éxito con estadísticas
+            archivos_creados = [
+                f"• {ruta_nodos} ({len(proyecto.nodos)} nodos)",
+                f"• {ruta_rutas} ({len(proyecto.rutas)} rutas)"
+            ]
+            
+            if nodos_con_objetivo:
+                archivos_creados.append(f"• {ruta_objetivos} ({len(nodos_con_objetivo)} nodos con objetivo)")
+            
+            if parametros:
+                archivos_creados.append(f"• {ruta_parametros} ({len(parametros)} parámetros)")
+            
             QMessageBox.information(
                 view, 
                 "Exportación completada", 
-                f"Se han exportado {len(proyecto.nodos)} nodos y {len(proyecto.rutas)} rutas.\n"
-                f"Archivos creados:\n• {ruta_nodos}\n• {ruta_rutas}\n\n"
+                f"Se han exportado:\n"
+                f"• Nodos: {len(proyecto.nodos)}\n"
+                f"• Rutas: {len(proyecto.rutas)}\n"
+                f"• Nodos con objetivo: {len(nodos_con_objetivo)}\n"
+                f"• Parámetros: {len(parametros)}\n\n"
+                f"Archivos creados:\n" + "\n".join(archivos_creados) + f"\n\n"
                 f"Coordenadas exportadas en METROS (escala: {escala})"
             )
             
