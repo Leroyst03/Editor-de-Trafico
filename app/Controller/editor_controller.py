@@ -87,6 +87,18 @@ class EditorController(QObject):
             self.view.menuParametrosPlaya = self.view.menuBar().addMenu("Parámetros Playa")
             action_parametros_playa = self.view.menuParametrosPlaya.addAction("Configurar Parámetros Playa...")
             action_parametros_playa.triggered.connect(self.mostrar_dialogo_parametros_playa)
+        
+        # En el método __init__ del EditorController, después de los otros menús:
+
+        # Menu parametros carga/descarga
+        if hasattr(self.view, 'menuParametrosCargaDescarga'):
+            action_parametros_carga_descarga = self.view.menuParametrosCargaDescarga.addAction("Configurar Parámetros Carga/Descarga...")
+            action_parametros_carga_descarga.triggered.connect(self.mostrar_dialogo_parametros_carga_descarga)
+        else:
+            # Crear dinámicamente si no existe
+            self.view.menuParametrosCargaDescarga = self.view.menuBar().addMenu("Parámetros Carga/Descarga")
+            action_parametros_carga_descarga = self.view.menuParametrosCargaDescarga.addAction("Configurar Parámetros Carga/Descarga...")
+            action_parametros_carga_descarga.triggered.connect(self.mostrar_dialogo_parametros_carga_descarga)
 
         # --- Grupo de botones de modo ---
         self.modo_group = QButtonGroup()
@@ -462,21 +474,54 @@ class EditorController(QObject):
         # Obtener parámetros de playa actuales del proyecto
         parametros_playa_actuales = getattr(self.proyecto, 'parametros_playa', None)
         
+        # Si es None, inicializar estructura nueva
+        if parametros_playa_actuales is None:
+            parametros_playa_actuales = {
+                "propiedades_personalizadas": [],
+                "conjuntos": []
+            }
+        
         dialogo = DialogoParametrosPlaya(self.view, parametros_playa_actuales)
         
         if dialogo.exec_() == QDialog.Accepted:
             nuevos_parametros = dialogo.obtener_parametros()
             
             # Guardar en el proyecto
-            if not hasattr(self.proyecto, 'parametros_playa'):
-                self.proyecto.parametros_playa = {}
-            
             self.proyecto.parametros_playa = nuevos_parametros
             
-            print("Parámetros de playa guardados:", nuevos_parametros)
-            QMessageBox.information(self.view, "Parámetros Playa", 
-                                  "Parámetros de playa guardados correctamente.")
+            print(f"✓ Parámetros de playa guardados:")
+            print(f"  - Propiedades personalizadas: {len(nuevos_parametros.get('propiedades_personalizadas', []))}")
+            print(f"  - Conjuntos: {len(nuevos_parametros.get('conjuntos', []))}")
+            
+            QMessageBox.information(
+                self.view, 
+                "Parámetros Playa", 
+                f"Parámetros de playa guardados correctamente.\n\n"
+                f"Propiedades personalizadas: {len(nuevos_parametros.get('propiedades_personalizadas', []))}\n"
+                f"Conjuntos guardados: {len(nuevos_parametros.get('conjuntos', []))}"
+            )
 
+    def mostrar_dialogo_parametros_carga_descarga(self):
+        """Muestra el diálogo de configuración de parámetros de carga/descarga"""
+        from View.dialogo_parametros_carga_descarga import DialogoParametrosCargaDescarga
+        
+        # Obtener parámetros de carga/descarga actuales del proyecto
+        parametros_carga_descarga_actuales = getattr(self.proyecto, 'parametros_carga_descarga', None)
+        
+        dialogo = DialogoParametrosCargaDescarga(self.view, parametros_carga_descarga_actuales)
+        
+        if dialogo.exec_() == QDialog.Accepted:
+            nuevos_parametros = dialogo.obtener_parametros()
+            
+            # Guardar en el proyecto
+            if not hasattr(self.proyecto, 'parametros_carga_descarga'):
+                self.proyecto.parametros_carga_descarga = []
+            
+            self.proyecto.parametros_carga_descarga = nuevos_parametros
+            
+            print("Parámetros de carga/descarga guardados:", nuevos_parametros)
+            QMessageBox.information(self.view, "Parámetros Carga/Descarga", 
+                                "Parámetros de carga/descarga guardados correctamente.")
 
     # --- Gestión de modos ---
     def cambiar_modo(self, boton):
@@ -1838,13 +1883,26 @@ class EditorController(QObject):
             # Cargar proyecto
             self.proyecto = Proyecto.cargar(ruta_archivo)
             
-            # Asegurarse de que todos los nodos tengan campo "objetivo"
+            # Asegurar que todos los nodos tengan campo "objetivo"
             for nodo in self.proyecto.nodos:
                 if isinstance(nodo, dict):
                     if "objetivo" not in nodo:
                         nodo["objetivo"] = 0
                 elif not hasattr(nodo, "objetivo"):
                     setattr(nodo, "objetivo", 0)
+            
+            # Asegurar estructura correcta de parametros_carga_descarga
+            if not hasattr(self.proyecto, 'parametros_carga_descarga'):
+                self.proyecto.parametros_carga_descarga = {
+                    "propiedades_personalizadas": [],
+                    "conjuntos": []
+                }
+            elif isinstance(self.proyecto.parametros_carga_descarga, list):
+                # Convertir estructura antigua a nueva
+                self.proyecto.parametros_carga_descarga = {
+                    "propiedades_personalizadas": [],
+                    "conjuntos": self.proyecto.parametros_carga_descarga
+                }
             
             # Usar el mismo método para actualizar referencias
             self._actualizar_referencias_proyecto(self.proyecto)
@@ -5046,7 +5104,7 @@ class EditorController(QObject):
         if not self.proyecto:
             QMessageBox.warning(
                 self.view,
-                "No hay proyecto",
+                "⚠️ No hay proyecto",
                 "Debes crear o abrir un proyecto primero."
             )
             return
@@ -5055,31 +5113,35 @@ class EditorController(QObject):
         if not self.proyecto.nodos and not self.proyecto.rutas:
             QMessageBox.warning(
                 self.view,
-                "Proyecto vacío",
+                "⚠️ Proyecto vacío",
                 "El proyecto no contiene nodos ni rutas para exportar."
             )
             return
         
         # Obtener estadísticas
         nodos_con_objetivo = [n for n in self.proyecto.nodos if n.get("objetivo", 0) != 0]
-        parametros = getattr(self.proyecto, 'parametros', {})
-        tiene_parametros = bool(parametros)
+        parametros_playa = getattr(self.proyecto, 'parametros_playa', [])
+        parametros_carga_descarga = getattr(self.proyecto, 'parametros_carga_descarga', [])
         
-        # Mostrar diálogo de confirmación ACTUALIZADO
+        # Mostrar diálogo de confirmación
         confirmacion = QMessageBox.question(
             self.view,
-            "Confirmar exportación a SQLite",
-            f"¿Exportar proyecto actual a SQLite?\n\n"
+            "Exportar a SQLite",
+            f"¿Exportar proyecto actual a bases de datos SQLite?\n\n"
+            f"Estadísticas del proyecto:\n"
             f"• Nodos: {len(self.proyecto.nodos)}\n"
             f"• Rutas: {len(self.proyecto.rutas)}\n"
-            f"• Nodos Objetivo: {len(nodos_con_objetivo)}\n"
-            f"• Parámetros: {len(parametros)} parámetros\n\n"
-            f"Se crearán {'cuatro' if tiene_parametros else 'tres'} archivos:\n"
+            f"• Nodos con objetivo: {len(nodos_con_objetivo)}\n"
+            f"• Parámetros de playa: {len(parametros_playa)}\n"
+            f"• Parámetros carga/descarga: {len(parametros_carga_descarga)}\n\n"
+            f"Se crearán las siguientes bases de datos:\n"
             f"  - nodos.db (todos los atributos de nodos)\n"
             f"  - rutas.db (IDs: origen, destino, visitados)\n"
-            f"  - objetivos.db (nodos con objetivo != 0)\n"
-            f"{'  - parametros.db (parámetros del sistema)' if tiene_parametros else ''}\n\n"
-            f"Coordenadas exportadas en METROS (escala: {self.ESCALA})",
+            f"{'  - objetivos.db (nodos con objetivo != 0)' if nodos_con_objetivo else ''}\n"
+            f"{'  - parametros_playa.db (parámetros del sistema)' if parametros_playa else ''}\n"
+            f"{'  - tipo_carga_descarga.db (parámetros de carga/descarga)' if parametros_carga_descarga else ''}\n\n"
+            f"Coordenadas exportadas en METROS (escala: 1 píxel = {self.ESCALA} metros)\n\n"
+            f"¿Continuar con la exportación?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.Yes
         )
@@ -5088,13 +5150,12 @@ class EditorController(QObject):
             # Llamar al exportador pasando la escala
             ExportadorDB.exportar(self.proyecto, self.view, self.ESCALA)
 
-    # Modificar el método exportar_a_csv para incluir parámetros
     def exportar_a_csv(self):
         """Exporta el proyecto actual a archivos CSV separados."""
         if not self.proyecto:
             QMessageBox.warning(
                 self.view,
-                "No hay proyecto",
+                "⚠️ No hay proyecto",
                 "Debes crear o abrir un proyecto primero."
             )
             return
@@ -5103,32 +5164,34 @@ class EditorController(QObject):
         if not self.proyecto.nodos and not self.proyecto.rutas:
             QMessageBox.warning(
                 self.view,
-                "Proyecto vacío",
+                "⚠️ Proyecto vacío",
                 "El proyecto no contiene nodos ni rutas para exportar."
             )
             return
 
         nodos_con_objetivo = [n for n in self.proyecto.nodos if n.get("objetivo", 0) != 0]
+        parametros_playa = getattr(self.proyecto, 'parametros_playa', [])
+        parametros_carga_descarga = getattr(self.proyecto, 'parametros_carga_descarga', [])
         
-        # Obtener parámetros si existen
-        parametros = getattr(self.proyecto, 'parametros', {})
-        tiene_parametros = bool(parametros)
-
-        # Mostrar diálogo de confirmación actualizado
+        # Mostrar diálogo de confirmación
         confirmacion = QMessageBox.question(
             self.view,
-            "Confirmar exportación a CSV",
-            f"¿Exportar proyecto actual a CSV?\n\n"
+            "Exportar a CSV",
+            f"¿Exportar proyecto actual a archivos CSV?\n\n"
+            f"Estadísticas del proyecto:\n"
             f"• Nodos: {len(self.proyecto.nodos)}\n"
             f"• Rutas: {len(self.proyecto.rutas)}\n"
-            f"• Nodos Objetivo: {len(nodos_con_objetivo)}\n"
-            f"• Parámetros: {len(parametros)} parámetros\n\n"
-            f"Se crearán {'cuatro' if tiene_parametros else 'tres'} archivos:\n"
+            f"• Nodos con objetivo: {len(nodos_con_objetivo)}\n"
+            f"• Parámetros de playa: {len(parametros_playa)}\n"
+            f"• Parámetros carga/descarga: {len(parametros_carga_descarga)}\n\n"
+            f"Se crearán los siguientes archivos:\n"
             f"  - puntos.csv (todos los atributos de nodos)\n"
             f"  - rutas.csv (IDs: origen, destino, visitados)\n"
-            f"  - objetivos.csv (IDs y propiedades avanzadas)\n"
-            f"{'  - parametros.csv (parámetros del sistema)' if tiene_parametros else ''}\n\n"
-            f"Coordenadas exportadas en METROS (escala: {self.ESCALA})",
+            f"{'  - objetivos.csv (IDs y propiedades avanzadas)' if nodos_con_objetivo else ''}\n"
+            f"{'  - parametros_playa.csv (parámetros del sistema)' if parametros_playa else ''}\n"
+            f"{'  - tipo_carga_descarga.csv (parámetros de carga/descarga)' if parametros_carga_descarga else ''}\n\n"
+            f"Coordenadas exportadas en METROS (escala: 1 píxel = {self.ESCALA} metros)\n\n"
+            f"¿Continuar con la exportación?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.Yes
         )
@@ -5137,6 +5200,39 @@ class EditorController(QObject):
             # Llamar al exportador CSV pasando la escala
             ExportadorCSV.exportar(self.proyecto, self.view, self.ESCALA)
 
+    def mostrar_dialogo_parametros_carga_descarga(self):
+        """Muestra el diálogo de configuración de parámetros de carga/descarga"""
+        from View.dialogo_parametros_carga_descarga import DialogoParametrosCargaDescarga
+        
+        # Obtener parámetros de carga/descarga actuales del proyecto
+        parametros_carga_descarga_actuales = getattr(self.proyecto, 'parametros_carga_descarga', None)
+        
+        # Si es None, inicializar estructura nueva
+        if parametros_carga_descarga_actuales is None:
+            parametros_carga_descarga_actuales = {
+                "propiedades_personalizadas": [],
+                "conjuntos": []
+            }
+        
+        dialogo = DialogoParametrosCargaDescarga(self.view, parametros_carga_descarga_actuales)
+        
+        if dialogo.exec_() == QDialog.Accepted:
+            nuevos_parametros = dialogo.obtener_parametros()
+            
+            # Guardar en el proyecto
+            self.proyecto.parametros_carga_descarga = nuevos_parametros
+            
+            print(f"✓ Parámetros de carga/descarga guardados:")
+            print(f"  - Propiedades personalizadas: {len(nuevos_parametros.get('propiedades_personalizadas', []))}")
+            print(f"  - Conjuntos: {len(nuevos_parametros.get('conjuntos', []))}")
+            
+            QMessageBox.information(
+                self.view, 
+                "Parámetros Carga/Descarga", 
+                f"Parámetros de carga/descarga guardados correctamente.\n\n"
+                f"Propiedades personalizadas: {len(nuevos_parametros.get('propiedades_personalizadas', []))}\n"
+                f"Conjuntos guardados: {len(nuevos_parametros.get('conjuntos', []))}"
+            )
 
     def manejar_seleccion_nodo(self):
         """Maneja la selección de nodos, ajustando z-values para nodos solapados"""
@@ -5449,8 +5545,18 @@ class EditorController(QObject):
         """Actualiza todas las referencias al proyecto en controladores y subcontroladores"""
         self.proyecto = proyecto
         
-        # Reconectar señales del proyecto
-        self._conectar_señales_proyecto()
+        # Asegurar que el proyecto tenga la estructura nueva para parametros_carga_descarga
+        if not hasattr(self.proyecto, 'parametros_carga_descarga'):
+            self.proyecto.parametros_carga_descarga = {
+                "propiedades_personalizadas": [],
+                "conjuntos": []
+            }
+        elif isinstance(self.proyecto.parametros_carga_descarga, list):
+            # Convertir estructura antigua a nueva
+            self.proyecto.parametros_carga_descarga = {
+                "propiedades_personalizadas": [],
+                "conjuntos": self.proyecto.parametros_carga_descarga
+            }
         
         # Actualizar en subcontroladores
         self.mover_ctrl.proyecto = proyecto
@@ -5460,6 +5566,14 @@ class EditorController(QObject):
         # IMPORTANTE: Resetear el estado de los subcontroladores
         if self.modo_actual:
             self._resetear_modo_actual()
+        
+        # Asegurar que todos los nodos tienen el campo es_cargador
+        for nodo in self.proyecto.nodos:
+            if isinstance(nodo, dict):
+                if "es_cargador" not in nodo:
+                    nodo["es_cargador"] = 0  # Valor por defecto
+            elif not hasattr(nodo, "es_cargador"):
+                setattr(nodo, "es_cargador", 0)
         
         print("✓ Referencias del proyecto actualizadas en todos los controladores")
 

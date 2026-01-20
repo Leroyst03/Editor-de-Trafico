@@ -5,39 +5,40 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 
-class DialogoParametrosPlaya(QDialog):
-    def __init__(self, parent=None, parametros_playa=None):
+class DialogoParametrosCargaDescarga(QDialog):
+    def __init__(self, parent=None, parametros_carga_descarga=None):
         super().__init__(parent)
-        self.setWindowTitle("Parámetros de Playa")
-        self.setMinimumSize(1000, 600)
+        self.setWindowTitle("Parámetros de Carga/Descarga")
+        self.setMinimumSize(1200, 600)
         
         # Propiedades base (fijas)
         self.propiedades_base = [
-            "ID", "Vertical", "Columnas", "Filas", "Pose_num",
-            "Detectar_con_lidar_seguirdad", "Id_col", "Id_row", "ref_final"
+            "ID", "p_a", "p_b", "p_c", "p_d", "p_e", "p_f", "p_g", 
+            "p_h", "p_i", "p_j", "p_k", "p_l", "p_m", "p_n", "p_o", 
+            "p_p", "p_q", "p_r", "p_s", "p_t"
         ]
         
         # Propiedades personalizadas (dinámicas)
         self.propiedades_personalizadas = []
         
-        # Inicializar parámetros de playa
-        if parametros_playa is None:
-            self.parametros_playa = {
+        # Inicializar parámetros de carga/descarga
+        if parametros_carga_descarga is None:
+            self.parametros_carga_descarga = {
                 "propiedades_personalizadas": [],
                 "conjuntos": []
             }
-        elif isinstance(parametros_playa, list):
+        elif isinstance(parametros_carga_descarga, list):
             # Convertir estructura antigua a nueva
-            self.parametros_playa = {
+            self.parametros_carga_descarga = {
                 "propiedades_personalizadas": [],
-                "conjuntos": parametros_playa
+                "conjuntos": parametros_carga_descarga
             }
         else:
             # Usar estructura nueva
-            self.parametros_playa = parametros_playa.copy()
+            self.parametros_carga_descarga = parametros_carga_descarga.copy()
         
         # Cargar propiedades personalizadas desde la estructura
-        self.propiedades_personalizadas = self.parametros_playa.get("propiedades_personalizadas", [])
+        self.propiedades_personalizadas = self.parametros_carga_descarga.get("propiedades_personalizadas", [])
         
         self.setup_ui()
         self.cargar_conjuntos_defecto()
@@ -47,21 +48,21 @@ class DialogoParametrosPlaya(QDialog):
         
         # Información
         info_label = QLabel(
-            "Cada fila representa un conjunto de parámetros de playa.\n"
+            "Cada fila representa un conjunto de parámetros de carga/descarga.\n"
             "Las columnas gris claro son propiedades fijas. Puede agregar columnas personalizadas.\n"
-            "Cada conjunto debe tener un ID único."
+            "Cada conjunto debe tener un ID único.\n"
+            "Los valores -1 indican que el parámetro no se utiliza."
         )
         info_label.setStyleSheet("font-style: italic; color: #666;")
         layout_principal.addWidget(info_label)
         
-        # Tabla para parámetros de playa
+        # Tabla para parámetros de carga/descarga
         self.tabla = QTableWidget()
         self.actualizar_columnas_tabla()
         
-        # Configurar header igual que en el otro diálogo
+        # Configurar header
         header = self.tabla.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(QHeaderView.Stretch)
         
         layout_principal.addWidget(self.tabla)
         
@@ -83,11 +84,11 @@ class DialogoParametrosPlaya(QDialog):
         # Botones para filas
         filas_layout = QHBoxLayout()
         
-        self.btn_agregar_fila = QPushButton("Agregar Playa")
-        self.btn_eliminar_fila = QPushButton("Eliminar Playa Seleccionada")
+        self.btn_agregar_fila = QPushButton("Agregar Conjunto")
+        self.btn_eliminar_fila = QPushButton("Eliminar Conjunto Seleccionado")
         
-        self.btn_agregar_fila.clicked.connect(self.agregar_playa)
-        self.btn_eliminar_fila.clicked.connect(self.eliminar_playa)
+        self.btn_agregar_fila.clicked.connect(self.agregar_conjunto)
+        self.btn_eliminar_fila.clicked.connect(self.eliminar_conjunto)
         
         filas_layout.addWidget(self.btn_agregar_fila)
         filas_layout.addWidget(self.btn_eliminar_fila)
@@ -120,22 +121,34 @@ class DialogoParametrosPlaya(QDialog):
     
     def cargar_conjuntos_defecto(self):
         """Carga conjuntos por defecto si no hay datos"""
-        conjuntos = self.parametros_playa.get("conjuntos", [])
+        conjuntos = self.parametros_carga_descarga.get("conjuntos", [])
         
         if not conjuntos:
-            # Un solo conjunto por defecto
-            conjuntos = [{
-                "ID": 1,
-                "Vertical": 0,
-                "Columnas": 10,
-                "Filas": 10,
-                "Pose_num": 0,
-                "Detectar_con_lidar_seguirdad": 0,
-                "Id_col": 1,
-                "Id_row": 1,
-                "ref_final": 0
-            }]
-            self.parametros_playa["conjuntos"] = conjuntos
+            # Conjuntos por defecto como en el ejemplo
+            conjuntos = [
+                {
+                    "ID": 0,
+                    "p_a": 100, "p_b": -1, "p_c": -1, "p_d": -1, "p_e": -1,
+                    "p_f": -1, "p_g": -1, "p_h": -1, "p_i": -1, "p_j": -1,
+                    "p_k": -1, "p_l": -1, "p_m": -1, "p_n": -1, "p_o": -1,
+                    "p_p": -1, "p_q": -1, "p_r": -1, "p_s": -1, "p_t": -1
+                },
+                {
+                    "ID": 1,
+                    "p_a": 0, "p_b": 32, "p_c": 16, "p_d": 2, "p_e": 13,
+                    "p_f": 20, "p_g": 12, "p_h": 31, "p_i": 22, "p_j": 100,
+                    "p_k": -1, "p_l": -1, "p_m": -1, "p_n": -1, "p_o": -1,
+                    "p_p": -1, "p_q": -1, "p_r": -1, "p_s": -1, "p_t": -1
+                },
+                {
+                    "ID": 2,
+                    "p_a": 0, "p_b": 30, "p_c": 33, "p_d": 25, "p_e": 19,
+                    "p_f": 18, "p_g": 4, "p_h": 23, "p_i": 12, "p_j": 22,
+                    "p_k": 100, "p_l": -1, "p_m": -1, "p_n": -1, "p_o": -1,
+                    "p_p": -1, "p_q": -1, "p_r": -1, "p_s": -1, "p_t": -1
+                }
+            ]
+            self.parametros_carga_descarga["conjuntos"] = conjuntos
         
         # Actualizar tabla
         self.actualizar_tabla()
@@ -143,20 +156,17 @@ class DialogoParametrosPlaya(QDialog):
     def actualizar_tabla(self):
         """Actualiza el contenido de la tabla con los datos actuales"""
         todas_las_propiedades = self.propiedades_base + self.propiedades_personalizadas
-        conjuntos = self.parametros_playa.get("conjuntos", [])
+        conjuntos = self.parametros_carga_descarga.get("conjuntos", [])
         
         self.tabla.setRowCount(len(conjuntos))
         
-        for i, playa in enumerate(conjuntos):
+        for i, conjunto in enumerate(conjuntos):
             for j, propiedad in enumerate(todas_las_propiedades):
-                valor = playa.get(propiedad, "")
+                valor = conjunto.get(propiedad, "-1")
                 item = QTableWidgetItem(str(valor))
                 
-                # TODAS las celdas son editables (igual que en el otro diálogo)
+                # Todas las celdas son editables
                 item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
-                
-                # SIN color de fondo especial - igual que en el otro diálogo
-                # NO aplicamos background color para que se vea normal
                 
                 self.tabla.setItem(i, j, item)
         
@@ -165,8 +175,8 @@ class DialogoParametrosPlaya(QDialog):
         
         # Después de ajustar, asegurar que las columnas tengan un ancho mínimo
         for i in range(self.tabla.columnCount()):
-            if self.tabla.columnWidth(i) < 100:
-                self.tabla.setColumnWidth(i, 100)
+            if self.tabla.columnWidth(i) < 50:
+                self.tabla.setColumnWidth(i, 50)
     
     def agregar_propiedad_personalizada(self):
         """Agrega una nueva propiedad personalizada como columna"""
@@ -211,10 +221,10 @@ class DialogoParametrosPlaya(QDialog):
         else:
             QMessageBox.warning(self, "Advertencia", "Seleccione una columna personalizada para eliminar.")
     
-    def agregar_playa(self):
-        """Agrega una nueva fila (playa) a la tabla"""
+    def agregar_conjunto(self):
+        """Agrega una nueva fila (conjunto) a la tabla"""
         # Calcular el próximo ID
-        max_id = 0
+        max_id = -1
         for i in range(self.tabla.rowCount()):
             item = self.tabla.item(i, 0)  # Columna ID
             if item and item.text().strip():
@@ -229,35 +239,23 @@ class DialogoParametrosPlaya(QDialog):
         fila = self.tabla.rowCount()
         self.tabla.insertRow(fila)
         
-        # Configurar valores por defecto
-        valores_por_defecto = {
-            "ID": str(max_id + 1),
-            "Vertical": "0",
-            "Columnas": "10",
-            "Filas": "10",
-            "Pose_num": "0",
-            "Detectar_con_lidar_seguirdad": "0",
-            "Id_col": "1",
-            "Id_row": "1",
-            "ref_final": "0"
-        }
-        
+        # Configurar valores por defecto (-1 para todos los parámetros excepto ID)
         todas_las_propiedades = self.propiedades_base + self.propiedades_personalizadas
         
         for j, propiedad in enumerate(todas_las_propiedades):
-            valor = valores_por_defecto.get(propiedad, "")
+            if propiedad == "ID":
+                valor = str(max_id + 1)
+            else:
+                valor = "-1"
+                
             item = QTableWidgetItem(str(valor))
-            
-            # TODAS las celdas son editables (igual que en el otro diálogo)
             item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
-            
-            # SIN color de fondo especial
             self.tabla.setItem(fila, j, item)
         
         # Seleccionar la nueva fila
         self.tabla.setCurrentCell(fila, 0)
     
-    def eliminar_playa(self):
+    def eliminar_conjunto(self):
         """Elimina la fila seleccionada"""
         fila = self.tabla.currentRow()
         if fila >= 0:
@@ -272,11 +270,11 @@ class DialogoParametrosPlaya(QDialog):
         ids_vistos = set()
         
         for fila in range(self.tabla.rowCount()):
-            playa = {}
+            conjunto = {}
             
             for j, propiedad in enumerate(todas_las_propiedades):
                 item = self.tabla.item(fila, j)
-                valor = item.text().strip() if item else ""
+                valor = item.text().strip() if item else "-1"
                 
                 if propiedad == "ID":
                     if not valor:
@@ -289,44 +287,26 @@ class DialogoParametrosPlaya(QDialog):
                             QMessageBox.warning(self, "Error", f"El ID {id_valor} está duplicado.")
                             return
                         ids_vistos.add(id_valor)
-                        playa[propiedad] = id_valor
+                        conjunto[propiedad] = id_valor
                     except ValueError:
                         QMessageBox.warning(self, "Error", f"Fila {fila+1}: El ID debe ser un número entero.")
                         return
-                elif valor:
-                    # Convertir a número si es posible, mantener como string si no
+                else:
+                    # Convertir a número si es posible
                     try:
-                        if propiedad in ["Vertical", "Columnas", "Filas", "Pose_num", 
-                                        "Detectar_con_lidar_seguirdad", "Id_col", "Id_row", "ref_final"]:
-                            playa[propiedad] = int(valor)
+                        if valor == "" or valor.lower() == "null":
+                            conjunto[propiedad] = -1
                         else:
-                            # Propiedades personalizadas: intentar convertir a número, si no, dejar como string
-                            try:
-                                playa[propiedad] = int(valor)
-                            except ValueError:
-                                try:
-                                    playa[propiedad] = float(valor)
-                                except ValueError:
-                                    playa[propiedad] = valor
+                            conjunto[propiedad] = int(valor)
                     except ValueError:
                         QMessageBox.warning(self, "Error", 
-                                          f"Fila {fila+1}, Columna '{propiedad}': Valor inválido.")
+                                          f"Fila {fila+1}, Columna '{propiedad}': Valor inválido. Debe ser un número entero.")
                         return
-                else:
-                    # Valor vacío, usar valor por defecto para propiedades base
-                    if propiedad in ["Columnas", "Filas"]:
-                        playa[propiedad] = 10
-                    elif propiedad in ["Id_col", "Id_row"]:
-                        playa[propiedad] = 1
-                    elif propiedad in ["Vertical", "Pose_num", "Detectar_con_lidar_seguirdad", "ref_final"]:
-                        playa[propiedad] = 0
-                    else:
-                        playa[propiedad] = ""  # Propiedades personalizadas vacías
             
-            nuevos_conjuntos.append(playa)
+            nuevos_conjuntos.append(conjunto)
         
         # Actualizar la estructura completa
-        self.parametros_playa = {
+        self.parametros_carga_descarga = {
             "propiedades_personalizadas": self.propiedades_personalizadas,
             "conjuntos": nuevos_conjuntos
         }
@@ -334,8 +314,8 @@ class DialogoParametrosPlaya(QDialog):
         self.accept()
     
     def obtener_parametros(self):
-        """Retorna la estructura completa de parámetros de playa"""
-        return self.parametros_playa
+        """Retorna la estructura completa de parámetros de carga/descarga"""
+        return self.parametros_carga_descarga
     
     def obtener_propiedades(self):
         """Retorna todas las propiedades (base + personalizadas)"""
