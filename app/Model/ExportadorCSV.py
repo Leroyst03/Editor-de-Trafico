@@ -162,32 +162,45 @@ class ExportadorCSV:
                         'visitados': visitados_str
                     })
             
-            # +++ NUEVO: Exportar parámetros +++
-            ruta_parametros = os.path.join(carpeta, "parametros.csv")
-            parametros = getattr(proyecto, 'parametros', {})
+            # --- Exportar parámetros de playa ---
+            ruta_parametros_playa = os.path.join(carpeta, "parametros_playa.csv")
+            parametros_playa = getattr(proyecto, 'parametros_playa', [])
             
-            if parametros:
-                with open(ruta_parametros, 'w', newline='', encoding='utf-8') as archivo_parametros:
-                    campos = ['parametro', 'valor']
-                    escritor_csv = csv.DictWriter(archivo_parametros, fieldnames=campos)
+            if parametros_playa:
+                # Obtener todas las propiedades únicas de todos los registros
+                todas_las_propiedades = set()
+                for playa in parametros_playa:
+                    todas_las_propiedades.update(playa.keys())
+                
+                # Ordenar propiedades: ID primero, luego las demás alfabéticamente
+                propiedades_ordenadas = sorted(todas_las_propiedades)
+                if 'ID' in propiedades_ordenadas:
+                    propiedades_ordenadas.remove('ID')
+                    propiedades_ordenadas = ['ID'] + propiedades_ordenadas
+                
+                with open(ruta_parametros_playa, 'w', newline='', encoding='utf-8') as archivo_parametros_playa:
+                    escritor_csv = csv.DictWriter(archivo_parametros_playa, fieldnames=propiedades_ordenadas)
                     escritor_csv.writeheader()
                     
-                    for nombre, valor in parametros.items():
-                        escritor_csv.writerow({
-                            'parametro': nombre,
-                            'valor': valor
-                        })
+                    for playa in parametros_playa:
+                        # Asegurarse de que todas las propiedades existan en cada registro
+                        fila_completa = {}
+                        for prop in propiedades_ordenadas:
+                            fila_completa[prop] = playa.get(prop, "")
+                        escritor_csv.writerow(fila_completa)
 
             # Mostrar mensaje de éxito con estadísticas
+            mensaje = f"Se han exportado:\n"
+            mensaje += f"• {nodos_total} nodos a {ruta_puntos}\n"
+            mensaje += f"• {nodos_con_objetivo} nodos con objetivo a {ruta_objetivos}\n"
+            mensaje += f"• {len(proyecto.rutas)} rutas a {ruta_rutas}\n"
+            mensaje += f"• {len(parametros_playa)} playas a {ruta_parametros_playa if parametros_playa else 'No hay parámetros de playa'}\n\n"
+            mensaje += f"Coordenadas exportadas en METROS (escala: {escala})"
+
             QMessageBox.information(
                 view, 
                 "Exportación a CSV completada", 
-                f"Se han exportado:\n"
-                f"• {nodos_total} nodos a {ruta_puntos}\n"
-                f"• {nodos_con_objetivo} nodos con objetivo a {ruta_objetivos}\n"
-                f"• {len(proyecto.rutas)} rutas a {ruta_rutas}\n"
-                f"• {len(parametros)} parámetros a {ruta_parametros if parametros else 'No hay parámetros'}\n\n"
-                f"Coordenadas exportadas en METROS (escala: {escala})"
+                mensaje
             )
 
         except Exception as e:

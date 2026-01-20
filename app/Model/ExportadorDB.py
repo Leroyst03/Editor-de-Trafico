@@ -6,11 +6,11 @@ class ExportadorDB:
     @staticmethod
     def exportar(proyecto, view, escala=0.05):
         """
-        Exporta el proyecto a cuatro bases de datos SQLite:
+        Exporta el proyecto a cinco bases de datos SQLite:
         - nodos.db: propiedades básicas de todos los nodos
         - objetivos.db: propiedades avanzadas de nodos con objetivo != 0
         - rutas.db: información de las rutas
-        - parametros.db: parámetros del sistema
+        - parametros_playa.db: parámetros de playa
         Las coordenadas se exportan en metros usando la escala proporcionada.
         """
         if not proyecto:
@@ -29,7 +29,7 @@ class ExportadorDB:
         ruta_nodos = os.path.join(carpeta, "nodos.db")
         ruta_objetivos = os.path.join(carpeta, "objetivos.db")
         ruta_rutas = os.path.join(carpeta, "rutas.db")
-        ruta_parametros = os.path.join(carpeta, "parametros.db")
+        ruta_parametros_playa = os.path.join(carpeta, "parametros_playa.db")
 
         try:
             # --- Exportar nodos (puntos básicos) ---
@@ -223,29 +223,60 @@ class ExportadorDB:
             conn_rutas.commit()
             conn_rutas.close()
             
-            # +++ NUEVO: Exportar parámetros +++
-            parametros = getattr(proyecto, 'parametros', {})
-            if parametros:
-                conn_parametros = sqlite3.connect(ruta_parametros)
-                cursor_parametros = conn_parametros.cursor()
+            # +++ Exportar parámetros de playa +++
+            parametros_playa = getattr(proyecto, 'parametros_playa', [])
+            if parametros_playa:
+                conn_parametros_playa = sqlite3.connect(ruta_parametros_playa)
+                cursor_parametros_playa = conn_parametros_playa.cursor()
                 
-                # Crear tabla de parámetros
-                cursor_parametros.execute("""
-                    CREATE TABLE IF NOT EXISTS parametros (
-                        parametro TEXT PRIMARY KEY,
-                        valor TEXT
-                    )
-                """)
+                # Obtener todas las propiedades únicas de todos los registros
+                todas_las_propiedades = set()
+                for playa in parametros_playa:
+                    todas_las_propiedades.update(playa.keys())
                 
-                # Insertar parámetros
-                for nombre, valor in parametros.items():
-                    cursor_parametros.execute("""
-                        INSERT INTO parametros (parametro, valor)
-                        VALUES (?, ?)
-                    """, (nombre, str(valor)))
+                # Ordenar propiedades: ID primero, luego las demás alfabéticamente
+                propiedades_ordenadas = sorted(todas_las_propiedades)
+                if 'ID' in propiedades_ordenadas:
+                    propiedades_ordenadas.remove('ID')
+                    propiedades_ordenadas = ['ID'] + propiedades_ordenadas
                 
-                conn_parametros.commit()
-                conn_parametros.close()
+                # Crear tabla con propiedades dinámicas
+                create_table_sql = f"""
+                    CREATE TABLE IF NOT EXISTS parametros_playa (
+                        {propiedades_ordenadas[0]} INTEGER PRIMARY KEY,
+                """
+                
+                # Agregar columnas dinámicas
+                for i, prop in enumerate(propiedades_ordenadas[1:], 1):
+                    create_table_sql += f"\n    {prop} TEXT"
+                    if i < len(propiedades_ordenadas) - 1:
+                        create_table_sql += ","
+                
+                create_table_sql += "\n)"
+                
+                cursor_parametros_playa.execute(create_table_sql)
+                
+                # Insertar parámetros de playa
+                for playa in parametros_playa:
+                    # Preparar valores
+                    valores = []
+                    placeholders = []
+                    
+                    for prop in propiedades_ordenadas:
+                        placeholders.append("?")
+                        valor = playa.get(prop, "")
+                        # Convertir a string si no es None
+                        valores.append(str(valor) if valor is not None else "")
+                    
+                    insert_sql = f"""
+                        INSERT INTO parametros_playa ({', '.join(propiedades_ordenadas)})
+                        VALUES ({', '.join(placeholders)})
+                    """
+                    
+                    cursor_parametros_playa.execute(insert_sql, tuple(valores))
+                
+                conn_parametros_playa.commit()
+                conn_parametros_playa.close()
             
             # Mostrar mensaje de éxito con estadísticas
             archivos_creados = [
@@ -256,8 +287,8 @@ class ExportadorDB:
             if nodos_con_objetivo:
                 archivos_creados.append(f"• {ruta_objetivos} ({len(nodos_con_objetivo)} nodos con objetivo)")
             
-            if parametros:
-                archivos_creados.append(f"• {ruta_parametros} ({len(parametros)} parámetros)")
+            if parametros_playa:
+                archivos_creados.append(f"• {ruta_parametros_playa} ({len(parametros_playa)} playas)")
             
             QMessageBox.information(
                 view, 
@@ -266,7 +297,7 @@ class ExportadorDB:
                 f"• Nodos: {len(proyecto.nodos)}\n"
                 f"• Rutas: {len(proyecto.rutas)}\n"
                 f"• Nodos con objetivo: {len(nodos_con_objetivo)}\n"
-                f"• Parámetros: {len(parametros)}\n\n"
+                f"• Playas: {len(parametros_playa)}\n\n"
                 f"Archivos creados:\n" + "\n".join(archivos_creados) + f"\n\n"
                 f"Coordenadas exportadas en METROS (escala: {escala})"
             )

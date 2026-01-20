@@ -30,8 +30,8 @@ class DialogoParametros(QDialog):
         # Botones para agregar/eliminar
         botones_layout = QHBoxLayout()
         
-        self.btn_agregar = QPushButton("➕ Agregar Parámetro")
-        self.btn_eliminar = QPushButton("➖ Eliminar Seleccionado")
+        self.btn_agregar = QPushButton("Agregar Parámetro")
+        self.btn_eliminar = QPushButton("Eliminar Seleccionado")
         
         self.btn_agregar.clicked.connect(self.agregar_parametro)
         self.btn_eliminar.clicked.connect(self.eliminar_parametro)
@@ -46,7 +46,7 @@ class DialogoParametros(QDialog):
         botones_dialogo = QHBoxLayout()
         botones_dialogo.addStretch()
         
-        self.btn_guardar = QPushButton("💾 Guardar")
+        self.btn_guardar = QPushButton("Guardar")
         self.btn_cancelar = QPushButton("Cancelar")
         
         self.btn_guardar.clicked.connect(self.guardar_parametros)

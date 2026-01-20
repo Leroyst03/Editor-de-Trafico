@@ -78,6 +78,16 @@ class EditorController(QObject):
             action_parametros = self.view.menuParametros.addAction("Configurar Parámetros...")
             action_parametros.triggered.connect(self.mostrar_dialogo_parametros)
 
+        # Menu parametros playa
+        if hasattr(self.view, 'menuParametrosPlaya'):
+            action_parametros_playa = self.view.menuParametrosPlaya.addAction("Configurar Parámetros Playa...")
+            action_parametros_playa.triggered.connect(self.mostrar_dialogo_parametros_playa)
+        else:
+            # Crear dinámicamente si no existe
+            self.view.menuParametrosPlaya = self.view.menuBar().addMenu("Parámetros Playa")
+            action_parametros_playa = self.view.menuParametrosPlaya.addAction("Configurar Parámetros Playa...")
+            action_parametros_playa.triggered.connect(self.mostrar_dialogo_parametros_playa)
+
         # --- Grupo de botones de modo ---
         self.modo_group = QButtonGroup()
         self.modo_group.setExclusive(False)
@@ -445,54 +455,27 @@ class EditorController(QObject):
             QMessageBox.information(self.view, "Parámetros", 
                                   "Parámetros guardados correctamente.")
     
-    # Modificar el método exportar_a_csv para incluir parámetros
-    def exportar_a_csv(self):
-        """Exporta el proyecto actual a archivos CSV separados."""
-        if not self.proyecto:
-            QMessageBox.warning(
-                self.view,
-                "No hay proyecto",
-                "Debes crear o abrir un proyecto primero."
-            )
-            return
-
-        # Verificar que hay datos para exportar
-        if not self.proyecto.nodos and not self.proyecto.rutas:
-            QMessageBox.warning(
-                self.view,
-                "Proyecto vacío",
-                "El proyecto no contiene nodos ni rutas para exportar."
-            )
-            return
-
-        nodos_con_objetivo = [n for n in self.proyecto.nodos if n.get("objetivo", 0) != 0]
+    def mostrar_dialogo_parametros_playa(self):
+        """Muestra el diálogo de configuración de parámetros de playa"""
+        from View.dialogo_parametros_playa import DialogoParametrosPlaya
         
-        # Obtener parámetros si existen
-        parametros = getattr(self.proyecto, 'parametros', {})
-        tiene_parametros = bool(parametros)
-
-        # Mostrar diálogo de confirmación actualizado
-        confirmacion = QMessageBox.question(
-            self.view,
-            "Confirmar exportación a CSV",
-            f"¿Exportar proyecto actual a CSV?\n\n"
-            f"• Nodos: {len(self.proyecto.nodos)}\n"
-            f"• Rutas: {len(self.proyecto.rutas)}\n"
-            f"• Nodos Objetivo: {len(nodos_con_objetivo)}\n"
-            f"• Parámetros: {len(parametros)} parámetros\n\n"
-            f"Se crearán {'cuatro' if tiene_parametros else 'tres'} archivos:\n"
-            f"  - puntos.csv (todos los atributos de nodos)\n"
-            f"  - rutas.csv (IDs: origen, destino, visitados)\n"
-            f"  - objetivos.csv (IDs y propiedades avanzadas)\n"
-            f"{'  - parametros.csv (parámetros del sistema)' if tiene_parametros else ''}\n\n"
-            f"Coordenadas exportadas en METROS (escala: {self.ESCALA})",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes
-        )
-
-        if confirmacion == QMessageBox.Yes:
-            # Llamar al exportador CSV pasando la escala
-            ExportadorCSV.exportar(self.proyecto, self.view, self.ESCALA)
+        # Obtener parámetros de playa actuales del proyecto
+        parametros_playa_actuales = getattr(self.proyecto, 'parametros_playa', None)
+        
+        dialogo = DialogoParametrosPlaya(self.view, parametros_playa_actuales)
+        
+        if dialogo.exec_() == QDialog.Accepted:
+            nuevos_parametros = dialogo.obtener_parametros()
+            
+            # Guardar en el proyecto
+            if not hasattr(self.proyecto, 'parametros_playa'):
+                self.proyecto.parametros_playa = {}
+            
+            self.proyecto.parametros_playa = nuevos_parametros
+            
+            print("Parámetros de playa guardados:", nuevos_parametros)
+            QMessageBox.information(self.view, "Parámetros Playa", 
+                                  "Parámetros de playa guardados correctamente.")
 
 
     # --- Gestión de modos ---
@@ -5105,6 +5088,7 @@ class EditorController(QObject):
             # Llamar al exportador pasando la escala
             ExportadorDB.exportar(self.proyecto, self.view, self.ESCALA)
 
+    # Modificar el método exportar_a_csv para incluir parámetros
     def exportar_a_csv(self):
         """Exporta el proyecto actual a archivos CSV separados."""
         if not self.proyecto:
@@ -5125,19 +5109,25 @@ class EditorController(QObject):
             return
 
         nodos_con_objetivo = [n for n in self.proyecto.nodos if n.get("objetivo", 0) != 0]
+        
+        # Obtener parámetros si existen
+        parametros = getattr(self.proyecto, 'parametros', {})
+        tiene_parametros = bool(parametros)
 
-        # Mostrar diálogo de confirmación
+        # Mostrar diálogo de confirmación actualizado
         confirmacion = QMessageBox.question(
             self.view,
             "Confirmar exportación a CSV",
             f"¿Exportar proyecto actual a CSV?\n\n"
             f"• Nodos: {len(self.proyecto.nodos)}\n"
             f"• Rutas: {len(self.proyecto.rutas)}\n"
-            f"• Nodos Objetivo: {len(nodos_con_objetivo)}\n\n"
-            f"Se crearán dos archivos:\n"
-            f"  - nodos.csv (todos los atributos de nodos)\n"
+            f"• Nodos Objetivo: {len(nodos_con_objetivo)}\n"
+            f"• Parámetros: {len(parametros)} parámetros\n\n"
+            f"Se crearán {'cuatro' if tiene_parametros else 'tres'} archivos:\n"
+            f"  - puntos.csv (todos los atributos de nodos)\n"
             f"  - rutas.csv (IDs: origen, destino, visitados)\n"
-            f"  - objetivo.csv (IDs y propiedades avanzadas)\n\n"
+            f"  - objetivos.csv (IDs y propiedades avanzadas)\n"
+            f"{'  - parametros.csv (parámetros del sistema)' if tiene_parametros else ''}\n\n"
             f"Coordenadas exportadas en METROS (escala: {self.ESCALA})",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.Yes
@@ -5146,6 +5136,7 @@ class EditorController(QObject):
         if confirmacion == QMessageBox.Yes:
             # Llamar al exportador CSV pasando la escala
             ExportadorCSV.exportar(self.proyecto, self.view, self.ESCALA)
+
 
     def manejar_seleccion_nodo(self):
         """Maneja la selección de nodos, ajustando z-values para nodos solapados"""
