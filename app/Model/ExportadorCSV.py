@@ -188,13 +188,58 @@ class ExportadorCSV:
                         for prop in propiedades_ordenadas:
                             fila_completa[prop] = playa.get(prop, "")
                         escritor_csv.writerow(fila_completa)
+            
+            # --- Exportar parámetros generales ---
+            ruta_parametros = os.path.join(carpeta, "parametros.csv")
+            parametros = getattr(proyecto, 'parametros', {})
+            
+            if parametros:
+                with open(ruta_parametros, 'w', newline='', encoding='utf-8') as archivo_parametros:
+                    campos_parametros = ['clave', 'valor']
+                    escritor_csv = csv.DictWriter(archivo_parametros, fieldnames=campos_parametros)
+                    escritor_csv.writeheader()
+                    
+                    for clave, valor in parametros.items():
+                        escritor_csv.writerow({
+                            'clave': clave,
+                            'valor': str(valor)
+                        })
+            
+            # --- Exportar tipo_carga_descarga ---
+            ruta_tipo_carga_descarga = os.path.join(carpeta, "tipo_carga_descarga.csv")
+            parametros_carga_descarga = getattr(proyecto, 'parametros_carga_descarga', [])
+            
+            if parametros_carga_descarga:
+                # Obtener todas las propiedades únicas de todos los registros
+                todas_las_propiedades = set()
+                for carga_descarga in parametros_carga_descarga:
+                    todas_las_propiedades.update(carga_descarga.keys())
+                
+                # Ordenar propiedades: ID primero, luego las demás alfabéticamente
+                propiedades_ordenadas = sorted(todas_las_propiedades)
+                if 'ID' in propiedades_ordenadas:
+                    propiedades_ordenadas.remove('ID')
+                    propiedades_ordenadas = ['ID'] + propiedades_ordenadas
+                
+                with open(ruta_tipo_carga_descarga, 'w', newline='', encoding='utf-8') as archivo_tipo_carga_descarga:
+                    escritor_csv = csv.DictWriter(archivo_tipo_carga_descarga, fieldnames=propiedades_ordenadas)
+                    escritor_csv.writeheader()
+                    
+                    for carga_descarga in parametros_carga_descarga:
+                        # Asegurarse de que todas las propiedades existan en cada registro
+                        fila_completa = {}
+                        for prop in propiedades_ordenadas:
+                            fila_completa[prop] = carga_descarga.get(prop, "")
+                        escritor_csv.writerow(fila_completa)
 
             # Mostrar mensaje de éxito con estadísticas
             mensaje = f"Se han exportado:\n"
             mensaje += f"• {nodos_total} nodos a {ruta_puntos}\n"
             mensaje += f"• {nodos_con_objetivo} nodos con objetivo a {ruta_objetivos}\n"
             mensaje += f"• {len(proyecto.rutas)} rutas a {ruta_rutas}\n"
-            mensaje += f"• {len(parametros_playa)} playas a {ruta_parametros_playa if parametros_playa else 'No hay parámetros de playa'}\n\n"
+            mensaje += f"• {len(parametros_playa)} playas a {ruta_parametros_playa if parametros_playa else 'No hay parámetros de playa'}\n"
+            mensaje += f"• {len(parametros)} parámetros generales a {ruta_parametros if parametros else 'No hay parámetros generales'}\n"
+            mensaje += f"• {len(parametros_carga_descarga)} tipos de carga/descarga a {ruta_tipo_carga_descarga if parametros_carga_descarga else 'No hay tipos de carga/descarga'}\n\n"
             mensaje += f"Coordenadas exportadas en METROS (escala: {escala})"
 
             QMessageBox.information(

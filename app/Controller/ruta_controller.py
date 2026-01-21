@@ -214,6 +214,15 @@ class RutaController(QObject):
         ruta_dict = {"origen": origen, "visita": visita, "destino": destino}
         self.proyecto.agregar_ruta(ruta_dict)
 
+        if self.editor:
+            # Actualizar relaciones nodo-ruta para la nueva ruta
+            self.editor._actualizar_todas_relaciones_nodo_ruta()
+            # Actualizar lista de rutas
+            self.editor._actualizar_lista_rutas_con_widgets()
+            # Dibujar rutas inmediatamente
+            self.editor._dibujar_rutas()
+    
+
         # Mostrar coordenadas en metros
         x_origen_m = self.editor.pixeles_a_metros(origen.get('X', 0))
         y_origen_m = self.editor.pixeles_a_metros(origen.get('Y', 0))

@@ -6,11 +6,13 @@ class ExportadorDB:
     @staticmethod
     def exportar(proyecto, view, escala=0.05):
         """
-        Exporta el proyecto a cinco bases de datos SQLite:
+        Exporta el proyecto a seis bases de datos SQLite:
         - nodos.db: propiedades básicas de todos los nodos
         - objetivos.db: propiedades avanzadas de nodos con objetivo != 0
         - rutas.db: información de las rutas
         - parametros_playa.db: parámetros de playa
+        - parametros.db: parámetros generales del sistema
+        - tipo_carga_descarga.db: parámetros de carga/descarga
         Las coordenadas se exportan en metros usando la escala proporcionada.
         """
         if not proyecto:
@@ -30,6 +32,8 @@ class ExportadorDB:
         ruta_objetivos = os.path.join(carpeta, "objetivos.db")
         ruta_rutas = os.path.join(carpeta, "rutas.db")
         ruta_parametros_playa = os.path.join(carpeta, "parametros_playa.db")
+        ruta_parametros = os.path.join(carpeta, "parametros.db")
+        ruta_tipo_carga_descarga = os.path.join(carpeta, "tipo_carga_descarga.db")
 
         try:
             # --- Exportar nodos (puntos básicos) ---
@@ -278,6 +282,85 @@ class ExportadorDB:
                 conn_parametros_playa.commit()
                 conn_parametros_playa.close()
             
+            # +++ Exportar parámetros generales +++
+            parametros = getattr(proyecto, 'parametros', {})
+            if parametros:
+                conn_parametros = sqlite3.connect(ruta_parametros)
+                cursor_parametros = conn_parametros.cursor()
+                
+                # Crear tabla de parámetros
+                cursor_parametros.execute("""
+                    CREATE TABLE IF NOT EXISTS parametros (
+                        clave TEXT PRIMARY KEY,
+                        valor TEXT
+                    )
+                """)
+                
+                # Insertar parámetros
+                for clave, valor in parametros.items():
+                    cursor_parametros.execute("""
+                        INSERT OR REPLACE INTO parametros (clave, valor)
+                        VALUES (?, ?)
+                    """, (clave, str(valor)))
+                
+                conn_parametros.commit()
+                conn_parametros.close()
+            
+            # +++ Exportar tipo_carga_descarga +++
+            parametros_carga_descarga = getattr(proyecto, 'parametros_carga_descarga', [])
+            if parametros_carga_descarga:
+                conn_tipo_carga_descarga = sqlite3.connect(ruta_tipo_carga_descarga)
+                cursor_tipo_carga_descarga = conn_tipo_carga_descarga.cursor()
+                
+                # Obtener todas las propiedades únicas de todos los registros
+                todas_las_propiedades = set()
+                for carga_descarga in parametros_carga_descarga:
+                    todas_las_propiedades.update(carga_descarga.keys())
+                
+                # Ordenar propiedades: ID primero, luego las demás alfabéticamente
+                propiedades_ordenadas = sorted(todas_las_propiedades)
+                if 'ID' in propiedades_ordenadas:
+                    propiedades_ordenadas.remove('ID')
+                    propiedades_ordenadas = ['ID'] + propiedades_ordenadas
+                
+                # Crear tabla con propiedades dinámicas
+                create_table_sql = f"""
+                    CREATE TABLE IF NOT EXISTS tipo_carga_descarga (
+                        {propiedades_ordenadas[0]} INTEGER PRIMARY KEY,
+                """
+                
+                # Agregar columnas dinámicas
+                for i, prop in enumerate(propiedades_ordenadas[1:], 1):
+                    create_table_sql += f"\n    {prop} TEXT"
+                    if i < len(propiedades_ordenadas) - 1:
+                        create_table_sql += ","
+                
+                create_table_sql += "\n)"
+                
+                cursor_tipo_carga_descarga.execute(create_table_sql)
+                
+                # Insertar parámetros de carga/descarga
+                for carga_descarga in parametros_carga_descarga:
+                    # Preparar valores
+                    valores = []
+                    placeholders = []
+                    
+                    for prop in propiedades_ordenadas:
+                        placeholders.append("?")
+                        valor = carga_descarga.get(prop, "")
+                        # Convertir a string si no es None
+                        valores.append(str(valor) if valor is not None else "")
+                    
+                    insert_sql = f"""
+                        INSERT INTO tipo_carga_descarga ({', '.join(propiedades_ordenadas)})
+                        VALUES ({', '.join(placeholders)})
+                    """
+                    
+                    cursor_tipo_carga_descarga.execute(insert_sql, tuple(valores))
+                
+                conn_tipo_carga_descarga.commit()
+                conn_tipo_carga_descarga.close()
+            
             # Mostrar mensaje de éxito con estadísticas
             archivos_creados = [
                 f"• {ruta_nodos} ({len(proyecto.nodos)} nodos)",
@@ -290,6 +373,12 @@ class ExportadorDB:
             if parametros_playa:
                 archivos_creados.append(f"• {ruta_parametros_playa} ({len(parametros_playa)} playas)")
             
+            if parametros:
+                archivos_creados.append(f"• {ruta_parametros} ({len(parametros)} parámetros generales)")
+            
+            if parametros_carga_descarga:
+                archivos_creados.append(f"• {ruta_tipo_carga_descarga} ({len(parametros_carga_descarga)} tipos de carga/descarga)")
+            
             QMessageBox.information(
                 view, 
                 "Exportación completada", 
@@ -297,7 +386,9 @@ class ExportadorDB:
                 f"• Nodos: {len(proyecto.nodos)}\n"
                 f"• Rutas: {len(proyecto.rutas)}\n"
                 f"• Nodos con objetivo: {len(nodos_con_objetivo)}\n"
-                f"• Playas: {len(parametros_playa)}\n\n"
+                f"• Playas: {len(parametros_playa)}\n"
+                f"• Parámetros generales: {len(parametros)}\n"
+                f"• Tipos carga/descarga: {len(parametros_carga_descarga)}\n\n"
                 f"Archivos creados:\n" + "\n".join(archivos_creados) + f"\n\n"
                 f"Coordenadas exportadas en METROS (escala: {escala})"
             )

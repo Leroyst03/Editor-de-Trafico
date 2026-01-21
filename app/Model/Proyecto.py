@@ -9,14 +9,17 @@ class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
     proyecto_cambiado = pyqtSignal()      # Cambio general en el proyecto
     nodo_agregado = pyqtSignal(object)   # Nuevo: nodo agregado
     ruta_agregada = pyqtSignal(object)   # Nuevo: ruta agregada
+    parametros_carga_descarga_modificados = pyqtSignal(list)  # Nuevo: parámetros carga/descarga modificados
+    parametros_playa_modificados = pyqtSignal(list)          # Nuevo: parámetros playa modificados
     
     def __init__(self, mapa=None, nodos=None, rutas=None):
         super().__init__()
         self.mapa = mapa
         self.nodos = nodos if nodos is not None else []
         self.rutas = rutas if rutas is not None else []
-        self.parametros = self._parametros_por_defecto()  #atributo parámetros
-        self.parametros_playa = [] # Parámetros específicos de playa
+        self.parametros = self._parametros_por_defecto()  # atributo parámetros
+        self.parametros_playa = []  # Parámetros específicos de playa
+        self.parametros_carga_descarga = []  # NUEVO: Parámetros de carga/descarga
 
     def _parametros_por_defecto(self):
         """Devuelve los parámetros por defecto del sistema"""
@@ -38,6 +41,46 @@ class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
             "G_PAL_L_P_off": 0,
             "G_PAL_A_P_off_peso": 0
         }
+    
+    def _parametros_carga_descarga_por_defecto(self):
+        """Devuelve los parámetros de carga/descarga por defecto"""
+        return [
+            {
+                "ID": 0,
+                "p_a": 100, "p_b": -1, "p_c": -1, "p_d": -1, "p_e": -1,
+                "p_f": -1, "p_g": -1, "p_h": -1, "p_i": -1, "p_j": -1,
+                "p_k": -1, "p_l": -1, "p_m": -1, "p_n": -1, "p_o": -1,
+                "p_p": -1, "p_q": -1, "p_r": -1, "p_s": -1, "p_t": -1
+            },
+            {
+                "ID": 1,
+                "p_a": 0, "p_b": 32, "p_c": 16, "p_d": 2, "p_e": 13,
+                "p_f": 20, "p_g": 12, "p_h": 31, "p_i": 22, "p_j": 100,
+                "p_k": -1, "p_l": -1, "p_m": -1, "p_n": -1, "p_o": -1,
+                "p_p": -1, "p_q": -1, "p_r": -1, "p_s": -1, "p_t": -1
+            },
+            {
+                "ID": 2,
+                "p_a": 0, "p_b": 30, "p_c": 33, "p_d": 25, "p_e": 19,
+                "p_f": 18, "p_g": 4, "p_h": 23, "p_i": 12, "p_j": 22,
+                "p_k": 100, "p_l": -1, "p_m": -1, "p_n": -1, "p_o": -1,
+                "p_p": -1, "p_q": -1, "p_r": -1, "p_s": -1, "p_t": -1
+            }
+        ]
+    
+    def _parametros_playa_por_defecto(self):
+        """Devuelve los parámetros de playa por defecto"""
+        return [{
+            "ID": 1,
+            "Vertical": 0,
+            "Columnas": 10,
+            "Filas": 10,
+            "Pose_num": 0,
+            "Detectar_con_lidar_seguirdad": 0,
+            "Id_col": 1,
+            "Id_row": 1,
+            "ref_final": 0
+        }]
 
     def agregar_nodo(self, x, y):
         """Crea un nodo con atributos iniciales y lo añade al proyecto."""
@@ -123,6 +166,34 @@ class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
             self.proyecto_cambiado.emit()
             return ruta_eliminada
         return None
+    
+    # NUEVO: Métodos para manejar parámetros de carga/descarga
+    def actualizar_parametros_carga_descarga(self, nuevos_parametros):
+        """Actualiza los parámetros de carga/descarga"""
+        self.parametros_carga_descarga = nuevos_parametros
+        # Notificar que se modificaron los parámetros de carga/descarga
+        self.parametros_carga_descarga_modificados.emit(self.parametros_carga_descarga)
+        self.proyecto_cambiado.emit()
+    
+    def obtener_parametros_carga_descarga(self):
+        """Devuelve los parámetros de carga/descarga"""
+        if not self.parametros_carga_descarga:
+            return self._parametros_carga_descarga_por_defecto()
+        return self.parametros_carga_descarga
+    
+    # NUEVO: Métodos para manejar parámetros de playa
+    def actualizar_parametros_playa(self, nuevos_parametros):
+        """Actualiza los parámetros de playa"""
+        self.parametros_playa = nuevos_parametros
+        # Notificar que se modificaron los parámetros de playa
+        self.parametros_playa_modificados.emit(self.parametros_playa)
+        self.proyecto_cambiado.emit()
+    
+    def obtener_parametros_playa(self):
+        """Devuelve los parámetros de playa"""
+        if not self.parametros_playa:
+            return self._parametros_playa_por_defecto()
+        return self.parametros_playa
 
     def guardar(self, ruta_archivo):
         """Guarda el proyecto en un archivo JSON con nodos completos en rutas."""
@@ -195,14 +266,16 @@ class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
             "nodos": [n.to_dict() for n in self.nodos],
             "rutas": rutas_con_nodos_completos,  # Nodos completos
             "parametros": self.parametros,  # incluir parámetros
-            "parametros_playa": self.parametros_playa  # NUEVO: incluir parámetros de playa
+            "parametros_playa": self.parametros_playa,  # incluir parámetros de playa
+            "parametros_carga_descarga": self.parametros_carga_descarga  # NUEVO: incluir parámetros de carga/descarga
         }
         
         with open(ruta_archivo, "w", encoding="utf-8") as f:
             json.dump(datos, f, indent=4, ensure_ascii=False)
         
         print(f"✓ Proyecto guardado con {len(rutas_con_nodos_completos)} rutas, "
-              f"{len(self.parametros)} parámetros y {len(self.parametros_playa)} parámetros de playa")
+              f"{len(self.parametros)} parámetros, {len(self.parametros_playa)} parámetros de playa "
+              f"y {len(self.parametros_carga_descarga)} parámetros de carga/descarga")
 
     @classmethod
     def cargar(cls, ruta_archivo):
@@ -222,7 +295,10 @@ class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
             parametros = proyecto_temp._parametros_por_defecto()
 
         # Cargar parámetros de playa
-        parametros_playa = datos.get("parametros_playa", {})
+        parametros_playa = datos.get("parametros_playa", [])
+
+        # NUEVO: Cargar parámetros de carga/descarga
+        parametros_carga_descarga = datos.get("parametros_carga_descarga", [])
 
         # Convertir nodos del JSON en objetos Nodo
         nodos = [Nodo(nd) for nd in nodos_data]
@@ -284,10 +360,12 @@ class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
         # Crear instancia del proyecto
         proyecto = cls(mapa, nodos, rutas_completas)
         proyecto.parametros = parametros  # asignar parámetros cargados
-        proyecto.parametros_playa = parametros_playa  # NUEVO: asignar parámetros de playa cargados
+        proyecto.parametros_playa = parametros_playa  # asignar parámetros de playa cargados
+        proyecto.parametros_carga_descarga = parametros_carga_descarga  # NUEVO: asignar parámetros de carga/descarga cargados
         
         print(f"✓ Proyecto cargado: {len(nodos)} nodos, {len(rutas_completas)} rutas, "
-              f"{len(parametros)} parámetros, {len(parametros_playa)} parámetros de playa")
+              f"{len(parametros)} parámetros, {len(parametros_playa)} parámetros de playa, "
+              f"{len(parametros_carga_descarga)} parámetros de carga/descarga")
         return proyecto
     
     def _update_routes_for_node(self, nodo_id):

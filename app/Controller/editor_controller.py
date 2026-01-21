@@ -88,6 +88,16 @@ class EditorController(QObject):
             action_parametros_playa = self.view.menuParametrosPlaya.addAction("Configurar Parámetros Playa...")
             action_parametros_playa.triggered.connect(self.mostrar_dialogo_parametros_playa)
 
+        # Menu parametros carga/descarga
+        if hasattr(self.view, 'menuParametrosCargaDescarga'):
+            action_parametros_carga_descarga = self.view.menuParametrosCargaDescarga.addAction("Configurar Parámetros Carga/Descarga...")
+            action_parametros_carga_descarga.triggered.connect(self.mostrar_dialogo_parametros_carga_descarga)
+        else:
+            # Crear dinámicamente si no existe
+            self.view.menuParametrosCargaDescarga = self.view.menuBar().addMenu("Parámetros Carga/Descarga")
+            action_parametros_carga_descarga = self.view.menuParametrosCargaDescarga.addAction("Configurar Parámetros Carga/Descarga...")
+            action_parametros_carga_descarga.triggered.connect(self.mostrar_dialogo_parametros_carga_descarga)
+
         # --- Grupo de botones de modo ---
         self.modo_group = QButtonGroup()
         self.modo_group.setExclusive(False)
@@ -476,6 +486,28 @@ class EditorController(QObject):
             print("Parámetros de playa guardados:", nuevos_parametros)
             QMessageBox.information(self.view, "Parámetros Playa", 
                                   "Parámetros de playa guardados correctamente.")
+
+    def mostrar_dialogo_parametros_carga_descarga(self):
+        """Muestra el diálogo de configuración de parámetros de carga/descarga"""
+        from View.dialogo_parametros_carga_descarga import DialogoParametrosCargaDescarga
+        
+        # Obtener parámetros de carga/descarga actuales del proyecto
+        parametros_carga_descarga_actuales = getattr(self.proyecto, 'parametros_carga_descarga', None)
+        
+        dialogo = DialogoParametrosCargaDescarga(self.view, parametros_carga_descarga_actuales)
+        
+        if dialogo.exec_() == QDialog.Accepted:
+            nuevos_parametros = dialogo.obtener_parametros()
+            
+            # Guardar en el proyecto
+            if not hasattr(self.proyecto, 'parametros_carga_descarga'):
+                self.proyecto.parametros_carga_descarga = {}
+            
+            self.proyecto.parametros_carga_descarga = nuevos_parametros
+            
+            print("Parámetros de carga/descarga guardados:", nuevos_parametros)
+            QMessageBox.information(self.view, "Parámetros Carga/Descarga", 
+                                "Parámetros de carga/descarga guardados correctamente.")
 
 
     # --- Gestión de modos ---
@@ -5040,7 +5072,6 @@ class EditorController(QObject):
         return None
 
     # --- NUEVO MÉTODO PARA EXPORTACIÓN SQLITE ---
-
     def exportar_a_sqlite(self):
         """Exporta el proyecto actual a bases de datos SQLite separadas."""
         if not self.proyecto:
@@ -5064,8 +5095,26 @@ class EditorController(QObject):
         nodos_con_objetivo = [n for n in self.proyecto.nodos if n.get("objetivo", 0) != 0]
         parametros = getattr(self.proyecto, 'parametros', {})
         tiene_parametros = bool(parametros)
+        parametros_playa = getattr(self.proyecto, 'parametros_playa', [])
+        tiene_parametros_playa = bool(parametros_playa)
+        parametros_carga_descarga = getattr(self.proyecto, 'parametros_carga_descarga', [])
+        tiene_parametros_carga_descarga = bool(parametros_carga_descarga)
         
-        # Mostrar diálogo de confirmación ACTUALIZADO
+        # Mostrar diálogo de confirmación
+        archivos_a_crear = []
+        if self.proyecto.nodos:
+            archivos_a_crear.append("nodos.db (todos los atributos de nodos)")
+        if self.proyecto.rutas:
+            archivos_a_crear.append("rutas.db (IDs: origen, destino, visitados)")
+        if nodos_con_objetivo:
+            archivos_a_crear.append("objetivos.db (nodos con objetivo != 0)")
+        if tiene_parametros:
+            archivos_a_crear.append("parametros.db (parámetros del sistema)")
+        if tiene_parametros_playa:
+            archivos_a_crear.append("parametros_playa.db (parámetros de playa)")
+        if tiene_parametros_carga_descarga:
+            archivos_a_crear.append("tipo_carga_descarga.db (parámetros de carga/descarga)")
+        
         confirmacion = QMessageBox.question(
             self.view,
             "Confirmar exportación a SQLite",
@@ -5073,12 +5122,10 @@ class EditorController(QObject):
             f"• Nodos: {len(self.proyecto.nodos)}\n"
             f"• Rutas: {len(self.proyecto.rutas)}\n"
             f"• Nodos Objetivo: {len(nodos_con_objetivo)}\n"
-            f"• Parámetros: {len(parametros)} parámetros\n\n"
-            f"Se crearán {'cuatro' if tiene_parametros else 'tres'} archivos:\n"
-            f"  - nodos.db (todos los atributos de nodos)\n"
-            f"  - rutas.db (IDs: origen, destino, visitados)\n"
-            f"  - objetivos.db (nodos con objetivo != 0)\n"
-            f"{'  - parametros.db (parámetros del sistema)' if tiene_parametros else ''}\n\n"
+            f"• Parámetros: {len(parametros)} parámetros\n"
+            f"• Playas: {len(parametros_playa)} playas\n"
+            f"• Tipos Carga/Descarga: {len(parametros_carga_descarga)}\n\n"
+            f"Se crearán {len(archivos_a_crear)} archivos:\n" + "\n".join([f"  - {archivo}" for archivo in archivos_a_crear]) + "\n\n"
             f"Coordenadas exportadas en METROS (escala: {self.ESCALA})",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.Yes
@@ -5088,7 +5135,7 @@ class EditorController(QObject):
             # Llamar al exportador pasando la escala
             ExportadorDB.exportar(self.proyecto, self.view, self.ESCALA)
 
-    # Modificar el método exportar_a_csv para incluir parámetros
+    # En el método exportar_a_csv del EditorController:
     def exportar_a_csv(self):
         """Exporta el proyecto actual a archivos CSV separados."""
         if not self.proyecto:
@@ -5113,8 +5160,26 @@ class EditorController(QObject):
         # Obtener parámetros si existen
         parametros = getattr(self.proyecto, 'parametros', {})
         tiene_parametros = bool(parametros)
+        parametros_playa = getattr(self.proyecto, 'parametros_playa', [])
+        tiene_parametros_playa = bool(parametros_playa)
+        parametros_carga_descarga = getattr(self.proyecto, 'parametros_carga_descarga', [])
+        tiene_parametros_carga_descarga = bool(parametros_carga_descarga)
 
         # Mostrar diálogo de confirmación actualizado
+        archivos_a_crear = []
+        if self.proyecto.nodos:
+            archivos_a_crear.append("puntos.csv (todos los atributos de nodos)")
+        if self.proyecto.rutas:
+            archivos_a_crear.append("rutas.csv (IDs: origen, destino, visitados)")
+        if nodos_con_objetivo:
+            archivos_a_crear.append("objetivos.csv (IDs y propiedades avanzadas)")
+        if tiene_parametros:
+            archivos_a_crear.append("parametros.csv (parámetros del sistema)")
+        if tiene_parametros_playa:
+            archivos_a_crear.append("parametros_playa.csv (parámetros de playa)")
+        if tiene_parametros_carga_descarga:
+            archivos_a_crear.append("tipo_carga_descarga.csv (parámetros de carga/descarga)")
+
         confirmacion = QMessageBox.question(
             self.view,
             "Confirmar exportación a CSV",
@@ -5122,12 +5187,10 @@ class EditorController(QObject):
             f"• Nodos: {len(self.proyecto.nodos)}\n"
             f"• Rutas: {len(self.proyecto.rutas)}\n"
             f"• Nodos Objetivo: {len(nodos_con_objetivo)}\n"
-            f"• Parámetros: {len(parametros)} parámetros\n\n"
-            f"Se crearán {'cuatro' if tiene_parametros else 'tres'} archivos:\n"
-            f"  - puntos.csv (todos los atributos de nodos)\n"
-            f"  - rutas.csv (IDs: origen, destino, visitados)\n"
-            f"  - objetivos.csv (IDs y propiedades avanzadas)\n"
-            f"{'  - parametros.csv (parámetros del sistema)' if tiene_parametros else ''}\n\n"
+            f"• Parámetros: {len(parametros)} parámetros\n"
+            f"• Playas: {len(parametros_playa)} playas\n"
+            f"• Tipos Carga/Descarga: {len(parametros_carga_descarga)}\n\n"
+            f"Se crearán {len(archivos_a_crear)} archivos:\n" + "\n".join([f"  - {archivo}" for archivo in archivos_a_crear]) + "\n\n"
             f"Coordenadas exportadas en METROS (escala: {self.ESCALA})",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.Yes
