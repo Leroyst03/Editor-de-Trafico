@@ -21,26 +21,10 @@ class DialogoParametrosPlaya(QDialog):
         self.propiedades_personalizadas = []
         
         # Inicializar parámetros de playa
-        if parametros_playa is None:
-            self.parametros_playa = {
-                "propiedades_personalizadas": [],
-                "conjuntos": []
-            }
-        elif isinstance(parametros_playa, list):
-            # Convertir estructura antigua a nueva
-            self.parametros_playa = {
-                "propiedades_personalizadas": [],
-                "conjuntos": parametros_playa
-            }
-        else:
-            # Usar estructura nueva
-            self.parametros_playa = parametros_playa.copy()
-        
-        # Cargar propiedades personalizadas desde la estructura
-        self.propiedades_personalizadas = self.parametros_playa.get("propiedades_personalizadas", [])
+        self.parametros_playa = parametros_playa.copy() if parametros_playa else []
         
         self.setup_ui()
-        self.cargar_conjuntos_defecto()
+        self.cargar_parametros_defecto()
     
     def setup_ui(self):
         layout_principal = QVBoxLayout()
@@ -118,13 +102,11 @@ class DialogoParametrosPlaya(QDialog):
         self.tabla.setColumnCount(len(todas_las_propiedades))
         self.tabla.setHorizontalHeaderLabels(todas_las_propiedades)
     
-    def cargar_conjuntos_defecto(self):
-        """Carga conjuntos por defecto si no hay datos"""
-        conjuntos = self.parametros_playa.get("conjuntos", [])
-        
-        if not conjuntos:
+    def cargar_parametros_defecto(self):
+        """Carga un conjunto por defecto si no hay datos"""
+        if not self.parametros_playa:
             # Un solo conjunto por defecto
-            conjuntos = [{
+            self.parametros_playa = [{
                 "ID": 1,
                 "Vertical": 0,
                 "Columnas": 10,
@@ -135,7 +117,6 @@ class DialogoParametrosPlaya(QDialog):
                 "Id_row": 1,
                 "ref_final": 0
             }]
-            self.parametros_playa["conjuntos"] = conjuntos
         
         # Actualizar tabla
         self.actualizar_tabla()
@@ -143,11 +124,9 @@ class DialogoParametrosPlaya(QDialog):
     def actualizar_tabla(self):
         """Actualiza el contenido de la tabla con los datos actuales"""
         todas_las_propiedades = self.propiedades_base + self.propiedades_personalizadas
-        conjuntos = self.parametros_playa.get("conjuntos", [])
+        self.tabla.setRowCount(len(self.parametros_playa))
         
-        self.tabla.setRowCount(len(conjuntos))
-        
-        for i, playa in enumerate(conjuntos):
+        for i, playa in enumerate(self.parametros_playa):
             for j, propiedad in enumerate(todas_las_propiedades):
                 valor = playa.get(propiedad, "")
                 item = QTableWidgetItem(str(valor))
@@ -268,7 +247,7 @@ class DialogoParametrosPlaya(QDialog):
     def guardar_parametros(self):
         """Guarda todos los parámetros de la tabla"""
         todas_las_propiedades = self.propiedades_base + self.propiedades_personalizadas
-        nuevos_conjuntos = []
+        nuevos_parametros = []
         ids_vistos = set()
         
         for fila in range(self.tabla.rowCount()):
@@ -323,18 +302,13 @@ class DialogoParametrosPlaya(QDialog):
                     else:
                         playa[propiedad] = ""  # Propiedades personalizadas vacías
             
-            nuevos_conjuntos.append(playa)
+            nuevos_parametros.append(playa)
         
-        # Actualizar la estructura completa
-        self.parametros_playa = {
-            "propiedades_personalizadas": self.propiedades_personalizadas,
-            "conjuntos": nuevos_conjuntos
-        }
-        
+        self.parametros_playa = nuevos_parametros
         self.accept()
     
     def obtener_parametros(self):
-        """Retorna la estructura completa de parámetros de playa"""
+        """Retorna la lista de parámetros de playa"""
         return self.parametros_playa
     
     def obtener_propiedades(self):

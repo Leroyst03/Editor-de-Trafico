@@ -11,7 +11,6 @@ class ExportadorDB:
         - objetivos.db: propiedades avanzadas de nodos con objetivo != 0
         - rutas.db: información de las rutas
         - parametros_playa.db: parámetros de playa
-        - tipo_carga_descarga.db: parámetros de carga/descarga
         Las coordenadas se exportan en metros usando la escala proporcionada.
         """
         if not proyecto:
@@ -31,7 +30,6 @@ class ExportadorDB:
         ruta_objetivos = os.path.join(carpeta, "objetivos.db")
         ruta_rutas = os.path.join(carpeta, "rutas.db")
         ruta_parametros_playa = os.path.join(carpeta, "parametros_playa.db")
-        ruta_tipo_carga_descarga = os.path.join(carpeta, "tipo_carga_descarga.db")
 
         try:
             # --- Exportar nodos (puntos básicos) ---
@@ -225,7 +223,7 @@ class ExportadorDB:
             conn_rutas.commit()
             conn_rutas.close()
             
-            # --- Exportar parámetros de playa ---
+            # +++ Exportar parámetros de playa +++
             parametros_playa = getattr(proyecto, 'parametros_playa', [])
             if parametros_playa:
                 conn_parametros_playa = sqlite3.connect(ruta_parametros_playa)
@@ -280,109 +278,33 @@ class ExportadorDB:
                 conn_parametros_playa.commit()
                 conn_parametros_playa.close()
             
-            # --- Exportar parámetros de carga/descarga ---
-            parametros_carga_descarga = getattr(proyecto, 'parametros_carga_descarga', [])
-            
-            if parametros_carga_descarga:
-                conn_carga_descarga = sqlite3.connect(ruta_tipo_carga_descarga)
-                cursor_carga_descarga = conn_carga_descarga.cursor()
-                
-                # Obtener todas las propiedades únicas de todos los registros
-                todas_las_propiedades = set()
-                for conjunto in parametros_carga_descarga:
-                    todas_las_propiedades.update(conjunto.keys())
-                
-                # Ordenar propiedades: ID primero, luego p_a a p_t, luego las demás alfabéticamente
-                propiedades_ordenadas = sorted(todas_las_propiedades)
-                
-                # Asegurar que ID esté primero
-                if 'ID' in propiedades_ordenadas:
-                    propiedades_ordenadas.remove('ID')
-                    propiedades_ordenadas = ['ID'] + propiedades_ordenadas
-                
-                # Ordenar p_a a p_t en orden
-                propiedades_p = [f'p_{chr(i)}' for i in range(ord('a'), ord('t')+1)]
-                for prop in propiedades_p:
-                    if prop in propiedades_ordenadas:
-                        propiedades_ordenadas.remove(prop)
-                
-                propiedades_ordenadas = ['ID'] + propiedades_p + sorted([p for p in propiedades_ordenadas if p not in ['ID'] + propiedades_p])
-                
-                # Crear tabla con propiedades dinámicas
-                create_table_sql = f"""
-                    CREATE TABLE IF NOT EXISTS tipo_carga_descarga (
-                        {propiedades_ordenadas[0]} INTEGER PRIMARY KEY,
-                """
-                
-                # Agregar columnas dinámicas
-                for i, prop in enumerate(propiedades_ordenadas[1:], 1):
-                    create_table_sql += f"\n    {prop} INTEGER DEFAULT -1"
-                    if i < len(propiedades_ordenadas) - 1:
-                        create_table_sql += ","
-                
-                create_table_sql += "\n)"
-                
-                cursor_carga_descarga.execute(create_table_sql)
-                
-                # Insertar parámetros de carga/descarga
-                for conjunto in parametros_carga_descarga:
-                    # Preparar valores
-                    valores = []
-                    placeholders = []
-                    
-                    for prop in propiedades_ordenadas:
-                        placeholders.append("?")
-                        valor = conjunto.get(prop, -1)
-                        valores.append(valor)
-                    
-                    insert_sql = f"""
-                        INSERT INTO tipo_carga_descarga ({', '.join(propiedades_ordenadas)})
-                        VALUES ({', '.join(placeholders)})
-                    """
-                    
-                    cursor_carga_descarga.execute(insert_sql, tuple(valores))
-                
-                conn_carga_descarga.commit()
-                conn_carga_descarga.close()
-            
             # Mostrar mensaje de éxito con estadísticas
-            archivos_creados = []
-            estadisticas = []
-            
-            # Estadísticas
-            estadisticas.append(f"• Nodos: {len(proyecto.nodos)} registros")
-            archivos_creados.append(f"  - nodos.db ({len(proyecto.nodos)} nodos)")
+            archivos_creados = [
+                f"• {ruta_nodos} ({len(proyecto.nodos)} nodos)",
+                f"• {ruta_rutas} ({len(proyecto.rutas)} rutas)"
+            ]
             
             if nodos_con_objetivo:
-                estadisticas.append(f"• Objetivos: {len(nodos_con_objetivo)} registros")
-                archivos_creados.append(f"  - objetivos.db ({len(nodos_con_objetivo)} nodos con objetivo)")
-            
-            estadisticas.append(f"• Rutas: {len(proyecto.rutas)} registros")
-            archivos_creados.append(f"  - rutas.db ({len(proyecto.rutas)} rutas)")
+                archivos_creados.append(f"• {ruta_objetivos} ({len(nodos_con_objetivo)} nodos con objetivo)")
             
             if parametros_playa:
-                estadisticas.append(f"• Parámetros de playa: {len(parametros_playa)} registros")
-                archivos_creados.append(f"  - parametros_playa.db ({len(parametros_playa)} playas)")
+                archivos_creados.append(f"• {ruta_parametros_playa} ({len(parametros_playa)} playas)")
             
-            if parametros_carga_descarga:
-                estadisticas.append(f"• Tipo de carga/descarga: {len(parametros_carga_descarga)} registros")
-                archivos_creados.append(f"  - tipo_carga_descarga.db ({len(parametros_carga_descarga)} conjuntos)")
-
-            mensaje = f"Exportación a SQLite completada exitosamente\n\n"
-            mensaje += f"Archivos generados en la carpeta:\n{carpeta}\n\n"
-            mensaje += "Estadísticas de exportación:\n" + "\n".join(estadisticas) + "\n\n"
-            mensaje += "Bases de datos creadas:\n" + "\n".join(archivos_creados) + "\n\n"
-            mensaje += f"Coordenadas exportadas en METROS (escala: 1 píxel = {escala} metros)"
-
             QMessageBox.information(
                 view, 
-                "Exportación a SQLite completada", 
-                mensaje
+                "Exportación completada", 
+                f"Se han exportado:\n"
+                f"• Nodos: {len(proyecto.nodos)}\n"
+                f"• Rutas: {len(proyecto.rutas)}\n"
+                f"• Nodos con objetivo: {len(nodos_con_objetivo)}\n"
+                f"• Playas: {len(parametros_playa)}\n\n"
+                f"Archivos creados:\n" + "\n".join(archivos_creados) + f"\n\n"
+                f"Coordenadas exportadas en METROS (escala: {escala})"
             )
             
         except Exception as e:
             QMessageBox.critical(
                 view, 
-                "Error en la exportación a SQLite", 
-                f"Ocurrió un error al exportar:\n\n{str(e)}\n\nPor favor, intente nuevamente."
+                "Error en la exportación", 
+                f"Ocurrió un error al exportar: {str(e)}"
             )

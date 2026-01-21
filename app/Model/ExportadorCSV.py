@@ -189,53 +189,13 @@ class ExportadorCSV:
                             fila_completa[prop] = playa.get(prop, "")
                         escritor_csv.writerow(fila_completa)
 
-            # --- Exportar parámetros de carga/descarga ---
-            ruta_tipo_carga_descarga = os.path.join(carpeta, "tipo_carga_descarga.csv")
-            parametros_carga_descarga = getattr(proyecto, 'parametros_carga_descarga', [])
-
-            if parametros_carga_descarga:
-                with open(ruta_tipo_carga_descarga, 'w', newline='', encoding='utf-8') as archivo_carga_descarga:
-                    # Obtener todas las propiedades únicas de todos los registros
-                    todas_las_propiedades = set()
-                    for conjunto in parametros_carga_descarga:
-                        todas_las_propiedades.update(conjunto.keys())
-                    
-                    # Ordenar propiedades: ID primero, luego p_a a p_t, luego las demás alfabéticamente
-                    propiedades_ordenadas = sorted(todas_las_propiedades)
-                    
-                    # Asegurar que ID esté primero
-                    if 'ID' in propiedades_ordenadas:
-                        propiedades_ordenadas.remove('ID')
-                        propiedades_ordenadas = ['ID'] + propiedades_ordenadas
-                    
-                    # Ordenar p_a a p_t en orden
-                    propiedades_p = [f'p_{chr(i)}' for i in range(ord('a'), ord('t')+1)]
-                    for prop in propiedades_p:
-                        if prop in propiedades_ordenadas:
-                            propiedades_ordenadas.remove(prop)
-                    
-                    propiedades_ordenadas = ['ID'] + propiedades_p + sorted([p for p in propiedades_ordenadas if p not in ['ID'] + propiedades_p])
-                    
-                    escritor_csv = csv.DictWriter(archivo_carga_descarga, fieldnames=propiedades_ordenadas)
-                    escritor_csv.writeheader()
-                    
-                    for conjunto in parametros_carga_descarga:
-                        # Asegurarse de que todas las propiedades existan en cada registro
-                        fila_completa = {}
-                        for prop in propiedades_ordenadas:
-                            fila_completa[prop] = conjunto.get(prop, "-1")
-                        escritor_csv.writerow(fila_completa)
-
             # Mostrar mensaje de éxito con estadísticas
-            mensaje = f"✓ Exportación a CSV completada exitosamente\n\n"
-            mensaje += f"Archivos generados en la carpeta:\n{carpeta}\n\n"
-            mensaje += f"Estadísticas de exportación:\n"
-            mensaje += f"• Puntos (nodos): {nodos_total} registros en puntos.csv\n"
-            mensaje += f"• Objetivos: {nodos_con_objetivo} registros en objetivos.csv\n"
-            mensaje += f"• Rutas: {len(proyecto.rutas)} registros en rutas.csv\n"
-            mensaje += f"• Parámetros de playa: {len(parametros_playa)} registros en parametros_playa.csv\n"
-            mensaje += f"• Tipo de carga/descarga: {len(parametros_carga_descarga)} registros en tipo_carga_descarga.csv\n\n"
-            mensaje += f"Coordenadas exportadas en METROS (escala: 1 píxel = {escala} metros)"
+            mensaje = f"Se han exportado:\n"
+            mensaje += f"• {nodos_total} nodos a {ruta_puntos}\n"
+            mensaje += f"• {nodos_con_objetivo} nodos con objetivo a {ruta_objetivos}\n"
+            mensaje += f"• {len(proyecto.rutas)} rutas a {ruta_rutas}\n"
+            mensaje += f"• {len(parametros_playa)} playas a {ruta_parametros_playa if parametros_playa else 'No hay parámetros de playa'}\n\n"
+            mensaje += f"Coordenadas exportadas en METROS (escala: {escala})"
 
             QMessageBox.information(
                 view, 
@@ -247,5 +207,5 @@ class ExportadorCSV:
             QMessageBox.critical(
                 view, 
                 "Error en la exportación a CSV", 
-                f"Ocurrió un error al exportar:\n\n{str(e)}\n\nPor favor, intente nuevamente."
+                f"Ocurrió un error al exportar: {str(e)}"
             )
