@@ -2995,54 +2995,69 @@ class EditorController(QObject):
         except Exception as err:
             print("Error en _actualizar_propiedad_ruta:", err)
 
-    # --- Dibujar rutas guardadas en rojo --
     def _dibujar_rutas(self):
-        """Dibuja todas las rutas usando la reconstrucción de rutas"""
         try:
             self._clear_route_lines()
         except Exception as e:
             print(f"Error en clear: {e}")
 
         if not getattr(self, "proyecto", None) or not hasattr(self.proyecto, "rutas"):
-            print("DEBUG: No hay proyecto o rutas para dibujar")
             return
 
-        # REPARAR REFERENCIAS ANTES DE DIBUJAR
         self._reparar_referencias_rutas()
-
-        # Reconstruir rutas para dibujo (excluyendo nodos ocultos)
         self.rutas_para_dibujo = self._reconstruir_rutas_para_dibujo()
         
-        pen = QPen(Qt.red, 2)
-        pen.setCosmetic(True)
+        base_pen = QPen(Qt.red, 2)
+        base_pen.setCosmetic(True)
         self._route_lines = []
 
         for ruta_idx, ruta_reconstruida in enumerate(self.rutas_para_dibujo):
             if not ruta_reconstruida or len(ruta_reconstruida) < 2:
-                # Ruta vacía o con insuficientes nodos
                 self._route_lines.append([])
                 continue
 
             route_line_items = []
             
-            # Dibujar segmentos entre nodos consecutivos en la ruta reconstruida
             for i in range(len(ruta_reconstruida) - 1):
                 n1, n2 = ruta_reconstruida[i], ruta_reconstruida[i + 1]
                 
+                # --- OBTENER ES_CURVA DEL NODO ACTUAL (desde el proyecto) ---
+                es_curva_valor = 0
+                # Extraer ID del nodo destino
+                nodo_id = None
+                if isinstance(n2, dict):
+                    nodo_id = n2.get('id')
+                elif hasattr(n2, 'get'):
+                    nodo_id = n2.get('id')
+                
+                if nodo_id is not None:
+                    nodo_actual = self._obtener_nodo_actual(nodo_id)
+                    if nodo_actual:
+                        # Obtener el valor actual de es_curva (convertir a entero)
+                        raw = nodo_actual.get('es_curva', 0)
+                        try:
+                            es_curva_valor = int(raw)
+                        except (ValueError, TypeError):
+                            es_curva_valor = 0
+                # -------------------------------------------------------------
+                
+                segment_pen = QPen(base_pen)
+                if es_curva_valor != 0:
+                    segment_pen.setStyle(Qt.DashLine)
+                else:
+                    segment_pen.setStyle(Qt.SolidLine)
+                
                 try:
-                    # Obtener coordenadas
                     x1 = n1.get("X", 0) if isinstance(n1, dict) else getattr(n1, "X", 0)
                     y1 = n1.get("Y", 0) if isinstance(n1, dict) else getattr(n1, "Y", 0)
                     x2 = n2.get("X", 0) if isinstance(n2, dict) else getattr(n2, "X", 0)
                     y2 = n2.get("Y", 0) if isinstance(n2, dict) else getattr(n2, "Y", 0)
                     
-                    line_item = self.scene.addLine(x1, y1, x2, y2, pen)
+                    line_item = self.scene.addLine(x1, y1, x2, y2, segment_pen)
                     line_item.setZValue(0.5)
                     line_item.setData(0, ("route_line", ruta_idx, i))
                     line_item.setVisible(True)
-                    
                     route_line_items.append(line_item)
-                    
                 except Exception as e:
                     print(f"Error dibujando segmento: {e}")
                     continue
@@ -3050,9 +3065,8 @@ class EditorController(QObject):
             self._route_lines.append(route_line_items)
 
         self.view.marco_trabajo.viewport().update()
-        print(f"✓ {len([r for r in self.rutas_para_dibujo if r])} rutas dibujadas (reconstruidas)")
 
-    # --- Propiedades de nodo en QListWidget editable ---
+    # --- Propiedades de nodo en QListWidget editable ---   
     def mostrar_propiedades_nodo(self, nodo):
         if self._updating_ui:
             return
@@ -3975,13 +3989,10 @@ class EditorController(QObject):
         return None
 
     def _actualizar_lineas_rutas_en_tiempo_real(self, rutas_info, nodo_id, x, y):
-        """Actualiza las líneas de las rutas en tiempo real durante el arrastre"""
-        # IMPORTANTE: No limpiamos todas las líneas, solo las de las rutas afectadas
+        base_pen = QPen(Qt.red, 2)
+        base_pen.setCosmetic(True)
         
-        pen = QPen(Qt.red, 2)
-        pen.setCosmetic(True)
-        
-        # Primero, eliminar las líneas de las rutas que vamos a actualizar
+        # Eliminar líneas de las rutas afectadas
         for idx, ruta_dict in rutas_info:
             if idx < len(self._route_lines):
                 for line_item in self._route_lines[idx]:
@@ -3992,28 +4003,42 @@ class EditorController(QObject):
                         pass
                 self._route_lines[idx] = []
         
-        # Ahora, volver a dibujar CADA ruta con las coordenadas actualizadas
         for idx, ruta_dict in rutas_info:
-            # Crear una copia del diccionario de la ruta para modificarla
             ruta_actualizada = dict(ruta_dict)
-            
-            # Actualizar las coordenadas del nodo movido en la ruta
             self._actualizar_coordenadas_en_ruta(ruta_actualizada, nodo_id, x, y)
-            
-            # Obtener todos los puntos de la ruta
             puntos = self._obtener_puntos_de_ruta(ruta_actualizada)
             
-            if len(puntos) < 2:
+            if len(puntos) < 2 or not self._ruta_es_visible(ruta_actualizada):
                 continue
             
-            # Verificar visibilidad
-            if not self._ruta_es_visible(ruta_actualizada):
-                continue
-            
-            # Dibujar los segmentos de la ruta
             route_line_items = []
             for i in range(len(puntos) - 1):
                 n1, n2 = puntos[i], puntos[i + 1]
+                
+                # --- OBTENER ES_CURVA DEL NODO ACTUAL ---
+                es_curva_valor = 0
+                # Extraer ID del nodo destino
+                nodo_id_dest = None
+                if isinstance(n2, dict):
+                    nodo_id_dest = n2.get('id')
+                elif hasattr(n2, 'get'):
+                    nodo_id_dest = n2.get('id')
+                
+                if nodo_id_dest is not None:
+                    nodo_actual = self._obtener_nodo_actual(nodo_id_dest)
+                    if nodo_actual:
+                        raw = nodo_actual.get('es_curva', 0)
+                        try:
+                            es_curva_valor = int(raw)
+                        except (ValueError, TypeError):
+                            es_curva_valor = 0
+                # -----------------------------------------
+                
+                segment_pen = QPen(base_pen)
+                if es_curva_valor != 0:
+                    segment_pen.setStyle(Qt.DashLine)
+                else:
+                    segment_pen.setStyle(Qt.SolidLine)
                 
                 try:
                     x1 = self._obtener_coordenada_x(n1)
@@ -4021,28 +4046,21 @@ class EditorController(QObject):
                     x2 = self._obtener_coordenada_x(n2)
                     y2 = self._obtener_coordenada_y(n2)
                     
-                    # Solo dibujar si las coordenadas son válidas
                     if x1 is not None and y1 is not None and x2 is not None and y2 is not None:
-                        line_item = self.scene.addLine(x1, y1, x2, y2, pen)
+                        line_item = self.scene.addLine(x1, y1, x2, y2, segment_pen)
                         line_item.setZValue(0.5)
                         line_item.setData(0, ("route_line", idx, i))
                         line_item.setVisible(True)
-                        
                         route_line_items.append(line_item)
-                        
                 except Exception as e:
                     print(f"Error dibujando segmento {i}: {e}")
                     continue
             
-            # Asegurarse de que tenemos espacio en el array
             while len(self._route_lines) <= idx:
                 self._route_lines.append([])
-            
             self._route_lines[idx] = route_line_items
         
-        # Forzar actualización de la vista INMEDIATAMENTE
         self.view.marco_trabajo.viewport().update()
-        print(f"DEBUG: {len(rutas_info)} rutas actualizadas en tiempo real")
 
     def _actualizar_coordenadas_en_ruta(self, ruta_dict, nodo_id, x, y):
         """Actualiza las coordenadas de un nodo específico en una ruta"""
@@ -4699,6 +4717,13 @@ class EditorController(QObject):
                     if ruta_idx not in self.nodo_en_rutas[nodo_id]:
                         self.nodo_en_rutas[nodo_id].append(ruta_idx)
     
+    def _obtener_nodo_actual(self, nodo_id):
+        """Devuelve el nodo actual del proyecto dado su ID, o None si no existe."""
+        for nodo in self.proyecto.nodos:
+            if nodo.get('id') == nodo_id:
+                return nodo
+        return None
+
     def _obtener_nodos_de_ruta(self, ruta_idx, solo_visibles=False):
         """Obtiene todos los nodos de una ruta específica, opcionalmente solo los visibles"""
         if ruta_idx >= len(self.proyecto.rutas):
@@ -5459,7 +5484,19 @@ class EditorController(QObject):
                 item.actualizar_objetivo()
                 
                 # Actualizar posición si cambió X o Y
-                if "X" in nodo or "Y" in nodo:
+                # CORRECCIÓN: Manejar dict y objetos Nodo correctamente
+                has_x = False
+                has_y = False
+                
+                if isinstance(nodo, dict):
+                    has_x = "X" in nodo
+                    has_y = "Y" in nodo
+                else:
+                    # Si es un objeto Nodo, usar hasattr
+                    has_x = hasattr(nodo, "X")
+                    has_y = hasattr(nodo, "Y")
+                
+                if has_x or has_y:
                     item.actualizar_posicion()
                 
                 # Forzar repintado para cualquier propiedad (incluyendo ángulo "A")
