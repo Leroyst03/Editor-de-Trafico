@@ -28,10 +28,10 @@ class ExportadorDB:
             return  # El usuario canceló
 
         # Rutas para las bases de datos
-        ruta_nodos = os.path.join(carpeta, "nodos.db")
+        ruta_nodos = os.path.join(carpeta, "puntos.db")
         ruta_objetivos = os.path.join(carpeta, "objetivos.db")
         ruta_rutas = os.path.join(carpeta, "rutas.db")
-        ruta_parametros_playa = os.path.join(carpeta, "parametros_playa.db")
+        ruta_parametros_playa = os.path.join(carpeta, "playas.db")
         ruta_parametros = os.path.join(carpeta, "parametros.db")
         ruta_tipo_carga_descarga = os.path.join(carpeta, "tipo_carga_descarga.db")
 

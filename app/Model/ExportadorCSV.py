@@ -163,7 +163,7 @@ class ExportadorCSV:
                     })
             
             # --- Exportar parámetros de playa ---
-            ruta_parametros_playa = os.path.join(carpeta, "parametros_playa.csv")
+            ruta_parametros_playa = os.path.join(carpeta, "playas.csv")
             parametros_playa = getattr(proyecto, 'parametros_playa', [])
             
             if parametros_playa:

@@ -5361,6 +5361,9 @@ class EditorController(QObject):
             if self.modo_actual in ["ruta", "colocar"]:
                 return False  # Dejar que el controlador respectivo maneje el clic
             
+            if event.button() == Qt.MiddleButton:
+                return False # Dejar que el evento pase a ZoomGraphicsView
+
             # SEGUNDO: Comportamiento normal (solo si NO estamos en modo ruta o colocar)
             items = self.scene.items(pos)
             if not any(isinstance(it, NodoItem) for it in items):

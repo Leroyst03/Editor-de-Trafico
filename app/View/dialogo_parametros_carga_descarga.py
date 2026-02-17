@@ -1,3 +1,6 @@
+import sys
+import os
+import subprocess
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTableWidget,
     QTableWidgetItem, QPushButton, QHeaderView, QMessageBox,
@@ -76,18 +79,6 @@ class DialogoParametrosCargaDescarga(QDialog):
         # Botones para propiedades
         propiedades_layout = QHBoxLayout()
         
-        self.btn_agregar_propiedad = QPushButton("Agregar Propiedad Personalizada")
-        self.btn_eliminar_propiedad = QPushButton("Eliminar Propiedad Seleccionada")
-        
-        self.btn_agregar_propiedad.clicked.connect(self.agregar_propiedad_personalizada)
-        self.btn_eliminar_propiedad.clicked.connect(self.eliminar_propiedad_personalizada)
-        
-        propiedades_layout.addWidget(self.btn_agregar_propiedad)
-        propiedades_layout.addWidget(self.btn_eliminar_propiedad)
-        propiedades_layout.addStretch()
-        
-        layout_principal.addLayout(propiedades_layout)
-        
         # Botones para filas
         filas_layout = QHBoxLayout()
         
@@ -105,6 +96,13 @@ class DialogoParametrosCargaDescarga(QDialog):
         
         # Botones de guardar/cancelar
         botones_dialogo = QHBoxLayout()
+        
+        # --- INICIO MODIFICACIÓN: Botón Ver Pasos ---
+        self.btn_ver_pasos = QPushButton("Ver pasos")
+        self.btn_ver_pasos.clicked.connect(self.abrir_archivo_pasos)
+        botones_dialogo.addWidget(self.btn_ver_pasos)
+        # --- FIN MODIFICACIÓN ---
+        
         botones_dialogo.addStretch()
         
         self.btn_guardar = QPushButton("Guardar")
@@ -120,6 +118,26 @@ class DialogoParametrosCargaDescarga(QDialog):
         
         self.setLayout(layout_principal)
     
+    # --- NUEVA FUNCIÓN: Abrir archivo de texto ---
+    def abrir_archivo_pasos(self):
+        nombre_archivo = "Pasos_carga_descarga.txt"
+        
+        # Verificar si el archivo existe en la ruta actual
+        if not os.path.exists(nombre_archivo):
+            QMessageBox.warning(self, "Archivo no encontrado", 
+                                f"No se encontró el archivo '{nombre_archivo}' en la raíz del proyecto.")
+            return
+
+        try:
+            if sys.platform == "win32":
+                os.startfile(nombre_archivo)
+            elif sys.platform == "darwin":  # macOS
+                subprocess.call(["open", nombre_archivo])
+            else:  # Linux y otros
+                subprocess.call(["xdg-open", nombre_archivo])
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"No se pudo abrir el archivo: {e}")
+            
     def actualizar_columnas_tabla(self):
         """Actualiza las columnas de la tabla con propiedades base y personalizadas"""
         todas_las_propiedades = self.propiedades_base + self.propiedades_personalizadas

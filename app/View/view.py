@@ -258,7 +258,7 @@ class EditorView(QMainWindow):
         descripciones = {
             "navegacion": "Modo navegación: Usa el ratón para desplazarte por el mapa. Haz clic en un nodo para seleccionarlo.",
             "mover": "Modo mover: Arrastra los nodos para cambiar su posición. Usa Ctrl+Z para deshacer y Ctrl+Y para rehacer.",
-            "colocar": "Modo colocar: Haz clic en el mapa para colocar un nuevo nodo.",
+            "colocar": "Modo colocar: Haz clic en el mapa para colocar un nuevo nodo. Puede pulsar Escape para salir del modo.",
             "ruta": "Modo ruta: Haz clic en nodos existentes o en el mapa para crear nuevos nodos y formar una ruta. Presiona Enter para finalizar la ruta o Escape para cancelar."
         }
         

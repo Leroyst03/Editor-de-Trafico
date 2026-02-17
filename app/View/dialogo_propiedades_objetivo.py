@@ -90,7 +90,7 @@ class DialogoPropiedadesObjetivo(QDialog):
         self.spin_altura = QSpinBox()
         self.spin_altura.setRange(0, 10)
         self.spin_altura.setValue(propiedades.get("Altura", 0))
-        layout_altura.addRow("Niveles:", self.spin_altura)
+        layout_altura.addRow("Nivel:", self.spin_altura)
         
         self.spin_altura_mm = QSpinBox()
         self.spin_altura_mm.setRange(0, 10000)
@@ -143,15 +143,29 @@ class DialogoPropiedadesObjetivo(QDialog):
         layout_operacion.addRow("Precisión:", self.spin_presicion)
         
         self.spin_ir_a_desicion = QSpinBox()
-        self.spin_ir_a_desicion.setRange(0, 1)
         self.spin_ir_a_desicion.setValue(propiedades.get("Ir_a_desicion", 0))
         layout_operacion.addRow("Ir a decisión:", self.spin_ir_a_desicion)
+        
+        # --- MOVIDO: Tipo carga/descarga ahora está en Operación ---
+        tipo_layout = QHBoxLayout()
+        self.spin_tipo_carga = QSpinBox()
+        self.spin_tipo_carga.setRange(0, 3)
+        self.spin_tipo_carga.setValue(propiedades.get("tipo_carga_descarga", 0))
+
+        tipo_layout.addWidget(self.spin_tipo_carga)
+        tipo_layout.addStretch()
+        
+        # Conectar el cambio de valor para actualizar la descripción
+        self.spin_tipo_carga.valueChanged.connect(self._actualizar_descripcion_tipo)
+        
+        layout_operacion.addRow("Tipo carga/descarga:", tipo_layout)
+        # -------------------------------------------------------------
         
         grupo_operacion.setLayout(layout_operacion)
         scroll_layout.addWidget(grupo_operacion)
         
-        # --- GRUPO 5: Configuración Final ---
-        grupo_final = QGroupBox("Configuración Final")
+        # --- GRUPO 5: Configuración Playa ---
+        grupo_final = QGroupBox("Configuración Playa")
         layout_final = QFormLayout()
         layout_final.setLabelAlignment(Qt.AlignRight)
         
@@ -159,25 +173,6 @@ class DialogoPropiedadesObjetivo(QDialog):
         self.spin_numero_playa.setRange(0, 1000)
         self.spin_numero_playa.setValue(propiedades.get("numero_playa", 0))
         layout_final.addRow("Número playa:", self.spin_numero_playa)
-        
-        # Tipo carga/descarga (NUMÉRICO)
-        tipo_layout = QHBoxLayout()
-        self.spin_tipo_carga = QSpinBox()
-        self.spin_tipo_carga.setRange(0, 3)
-        self.spin_tipo_carga.setValue(propiedades.get("tipo_carga_descarga", 0))
-        
-        # Label para mostrar el significado del valor actual
-        self.label_tipo_descripcion = QLabel(self._obtener_descripcion_tipo(propiedades.get("tipo_carga_descarga", 0)))
-        self.label_tipo_descripcion.setStyleSheet("color: #cccccc; font-style: italic; padding-left: 10px;")
-        
-        tipo_layout.addWidget(self.spin_tipo_carga)
-        tipo_layout.addWidget(self.label_tipo_descripcion)
-        tipo_layout.addStretch()
-        
-        # Conectar el cambio de valor para actualizar la descripción
-        self.spin_tipo_carga.valueChanged.connect(self._actualizar_descripcion_tipo)
-        
-        layout_final.addRow("Tipo carga/descarga:", tipo_layout)
         
         grupo_final.setLayout(layout_final)
         scroll_layout.addWidget(grupo_final)
@@ -209,19 +204,9 @@ class DialogoPropiedadesObjetivo(QDialog):
         layout_principal.addLayout(botones_layout)
         self.setLayout(layout_principal)
     
-    def _obtener_descripcion_tipo(self, valor):
-        """Obtiene la descripción textual del tipo de carga/descarga"""
-        descripciones = {
-            0: "Normal",
-            1: "Carga",
-            2: "Descarga", 
-            3: "Mixto"
-        }
-        return f"({descripciones.get(valor, 'Desconocido')})"
-    
     def _actualizar_descripcion_tipo(self, valor):
         """Actualiza la descripción cuando cambia el valor"""
-        self.label_tipo_descripcion.setText(self._obtener_descripcion_tipo(valor))
+        pass # Mantenido por si se implementa lógica futura
     
     def obtener_propiedades(self):
         """Devuelve un diccionario con los valores actuales"""

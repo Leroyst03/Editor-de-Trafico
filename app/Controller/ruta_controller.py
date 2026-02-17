@@ -1,5 +1,5 @@
 from PyQt5.QtCore import Qt, QObject, QEvent
-from PyQt5.QtWidgets import QListWidgetItem, QGraphicsLineItem
+from PyQt5.QtWidgets import QListWidgetItem, QGraphicsLineItem, QMenu  # Añadimos QMenu
 from PyQt5.QtGui import QPen
 from View.node_item import NodoItem
 
@@ -60,32 +60,96 @@ class RutaController(QObject):
         if obj is self.view.marco_trabajo.viewport() and event.type() == QEvent.MouseButtonPress:
             if event.button() == Qt.LeftButton and self.proyecto and self.activo:
                 scene_pos = self.view.marco_trabajo.mapToScene(event.pos())
-                # Mostrar en metros
-                x_m = self.editor.pixeles_a_metros(scene_pos.x())
-                y_m = self.editor.pixeles_a_metros(scene_pos.y())
-                print(f"✓ Clic en mapa - Posición: ({x_m:.2f}, {y_m:.2f}) metros")
                 
-                # itemAt recibe coordenadas del viewport
-                item = self.view.marco_trabajo.itemAt(event.pos())
+                # --- INICIO MEJORA: DETECCIÓN DE NODOS SUPERPUESTOS ---
+                # Obtener TODOS los items en la posición del clic
+                items_en_pos = self.view.marco_trabajo.scene().items(scene_pos)
                 
-                if isinstance(item, NodoItem):
-                    print(f"✓ Clic en nodo existente ID {item.nodo.get('id')}")
-                    self._add_existing_node(item)
+                # Filtrar solo los que son NodoItem
+                nodos_en_pos = [item for item in items_en_pos if isinstance(item, NodoItem)]
+                
+                if len(nodos_en_pos) > 1:
+                    # CASO: Hay nodos superpuestos -> Mostrar menú de selección
+                    print(f"⚠ Detectados {len(nodos_en_pos)} nodos superpuestos. Mostrando menú...")
+                    self._mostrar_menu_seleccion_nodo(nodos_en_pos, event.pos())
+                    return True
+                    
+                elif len(nodos_en_pos) == 1:
+                    # CASO: Un solo nodo -> Agregar directamente
+                    print(f"✓ Clic en nodo existente ID {nodos_en_pos[0].nodo.get('id')}")
+                    self._add_existing_node(nodos_en_pos[0])
+                    return True
+                    
                 else:
-                    # CORRECCIÓN: Usar el método crear_nodo del editor para registrar en historial
+                    # CASO: No hay nodos -> Crear nuevo nodo
+                    x_m = self.editor.pixeles_a_metros(scene_pos.x())
+                    y_m = self.editor.pixeles_a_metros(scene_pos.y())
                     print(f"✓ Creando nuevo nodo en posición ({x_m:.2f}, {y_m:.2f}) metros")
                     self._create_and_add_node(int(scene_pos.x()), int(scene_pos.y()))
-                return True
+                    return True
+                # --- FIN MEJORA ---
+
         return False
+
+    def _mostrar_menu_seleccion_nodo(self, nodos, pos_evento):
+        """
+        Muestra un menú contextual para seleccionar un nodo entre varios superpuestos.
+        
+        Args:
+            nodos: Lista de NodoItem detectados en la posición.
+            pos_evento: Posición del ratón (viewport coordinates) para ubicar el menú.
+        """
+        menu = QMenu(self.view)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #3c3c3c; 
+                color: white; 
+                border: 1px solid #5a5a5a;
+                padding: 5px;
+            }
+            QMenu::item {
+                padding: 5px 25px 5px 10px;
+                border-radius: 3px;
+            }
+            QMenu::item:selected {
+                background-color: #5a5a5a; 
+            }
+            QMenu::title {
+                color: #aaaaaa;
+                padding: 5px;
+            }
+        """)
+        menu.setTitle("Seleccionar nodo:")
+
+        for nodo_item in nodos:
+            nodo = nodo_item.nodo
+            objetivo = nodo.get('objetivo', 0)
+            
+            # Determinar tipo de objetivo
+            if objetivo == 1: texto_obj = "IN"
+            elif objetivo == 2: texto_obj = "OUT"
+            elif objetivo == 3: texto_obj = "I/O"
+            else: texto_obj = "Normal"
+            
+            # Formatear coordenadas en metros
+            x_m = self.editor.pixeles_a_metros(nodo.get('X', 0))
+            y_m = self.editor.pixeles_a_metros(nodo.get('Y', 0))
+            
+            action_text = f"ID: {nodo.get('id')} - {texto_obj} ({x_m:.2f}, {y_m:.2f})"
+            
+            action = menu.addAction(action_text)
+            # Usar lambda para capturar el nodo_item específico del bucle
+            action.triggered.connect(lambda checked, n_item=nodo_item: self._add_existing_node(n_item))
+
+        # Mostrar el menú en la posición global del cursor
+        menu.exec_(self.view.marco_trabajo.viewport().mapToGlobal(pos_evento))
 
     def _create_and_add_node(self, x, y):
         """Crea un nuevo nodo y lo añade a la ruta"""
-        # CORRECCIÓN: Usar el método crear_nodo del editor para registrar en historial
-        # Esto creará el nodo en el proyecto y retornará el NodoItem
+        # Usar el método crear_nodo del editor para registrar en historial
         nodo_item = self.editor.crear_nodo(x, y, registrar_historial=True)
         
         if nodo_item and hasattr(nodo_item, 'nodo'):
-            # Añadir a la secuencia de la ruta y dibujar segmento si hay anterior
             self._append_node_to_route(nodo_item.nodo, nodo_item)
             return True
         else:
@@ -95,8 +159,6 @@ class RutaController(QObject):
     def _add_existing_node(self, nodo_item):
         """Añade un nodo existente a la ruta"""
         nodo = nodo_item.nodo
-        
-        # Añadir a la secuencia de la ruta
         self._append_node_to_route(nodo, nodo_item)
 
     def _append_node_to_route(self, nodo, nodo_item):
@@ -123,21 +185,20 @@ class RutaController(QObject):
                                p1.y() + self._last_item.size/2,
                                p2.x() + nodo_item.size/2, 
                                p2.y() + nodo_item.size/2)
-        pen = QPen(Qt.darkGreen, 2)  # Color diferente para líneas temporales
+        pen = QPen(Qt.darkGreen, 2)
         line.setPen(pen)
-        line.setZValue(0.6)  # Z-value entre las líneas rojas y los nodos
-        line.setData(0, "ruta_temporal")  # Marcar como línea temporal
+        line.setZValue(0.6)
+        line.setData(0, "ruta_temporal")
         self.view.marco_trabajo.scene().addItem(line)
         self._lines.append(line)
 
-        # Conectar la señal moved de ambos nodos para actualizar líneas temporales
+        # Conectar señales de movimiento
         try:
             self._last_item.moved.connect(self._update_temp_lines)
             nodo_item.moved.connect(self._update_temp_lines)
         except Exception:
             pass
 
-        # Añadir nodo a la secuencia y actualizar last_item
         self._nodes_seq.append(nodo)
         self._last_item = nodo_item
         nodo_item.set_selected_color()
@@ -147,12 +208,9 @@ class RutaController(QObject):
         if not self._lines or len(self._nodes_seq) < 2:
             return
 
-        # Reconstruir todas las líneas temporales
         self._clear_temp_lines()
         
-        # Redibujar todas las líneas entre los nodos en la secuencia
         for i in range(len(self._nodes_seq) - 1):
-            # Buscar los NodoItems en la escena
             nodo1_item = None
             nodo2_item = None
             
@@ -176,13 +234,12 @@ class RutaController(QObject):
                 pen = QPen(Qt.darkGreen, 2)
                 line.setPen(pen)
                 line.setZValue(0.6)
-                line.setData(0, "ruta_temporal")  # Marcar como línea temporal
+                line.setData(0, "ruta_temporal")
                 self.view.marco_trabajo.scene().addItem(line)
                 self._lines.append(line)
 
     def _finalize_route(self):
         """Finaliza la ruta en construcción: guarda la ruta en el modelo"""
-        # Si no hay suficientes nodos, limpiar temporales y salir
         if len(self._nodes_seq) < 2:
             print("⚠ No se puede guardar: ruta necesita al menos 2 nodos")
             self._clear_temp_lines()
@@ -191,7 +248,6 @@ class RutaController(QObject):
 
         print(f"✓ Guardando ruta con {len(self._nodes_seq)} nodos")
         
-        # Normalizar nodos a dicts con id,X,Y
         ruta_nodes = []
         for n in self._nodes_seq:
             try:
@@ -210,34 +266,20 @@ class RutaController(QObject):
         destino = ruta_nodes[-1]
         visita = ruta_nodes[1:-1] if len(ruta_nodes) > 2 else []
 
-        # Guardar en proyecto.rutas usando el método agregar_ruta (que emitirá la señal)
         ruta_dict = {"origen": origen, "visita": visita, "destino": destino}
         self.proyecto.agregar_ruta(ruta_dict)
 
         if self.editor:
-            # Actualizar relaciones nodo-ruta para la nueva ruta
             self.editor._actualizar_todas_relaciones_nodo_ruta()
-            # Actualizar lista de rutas
             self.editor._actualizar_lista_rutas_con_widgets()
-            # Dibujar rutas inmediatamente
             self.editor._dibujar_rutas()
-    
-
-        # Mostrar coordenadas en metros
-        x_origen_m = self.editor.pixeles_a_metros(origen.get('X', 0))
-        y_origen_m = self.editor.pixeles_a_metros(origen.get('Y', 0))
-        x_destino_m = self.editor.pixeles_a_metros(destino.get('X', 0))
-        y_destino_m = self.editor.pixeles_a_metros(destino.get('Y', 0))
         
-        print(f"✓ Ruta guardada: Origen {origen.get('id')} ({x_origen_m:.2f}, {y_origen_m:.2f}) -> Destino {destino.get('id')} ({x_destino_m:.2f}, {y_destino_m:.2f})")
-
-        # Limpiar líneas temporales y estado de construcción
+        # Limpiar estado
         self._clear_temp_lines()
         self._clear_state()
 
     def _clear_temp_lines(self):
         """Elimina todas las líneas temporales"""
-        # Desconectar todas las señales de los nodos
         try:
             for nodo in self._nodes_seq:
                 for item in self.view.marco_trabajo.scene().items():
@@ -249,7 +291,6 @@ class RutaController(QObject):
         except Exception:
             pass
         
-        # Eliminar líneas temporales
         for l in list(self._lines):
             try:
                 if l.scene() is not None:
@@ -267,7 +308,6 @@ class RutaController(QObject):
         except Exception:
             pass
         
-        # Restaurar colores de todos los nodos en la secuencia
         for nodo in self._nodes_seq:
             for item in self.view.marco_trabajo.scene().items():
                 if isinstance(item, NodoItem) and getattr(item, "nodo", None) == nodo:
@@ -281,16 +321,10 @@ class RutaController(QObject):
         self._clear_temp_lines()
 
     def remover_nodo_de_secuencia(self, nodo_id):
-        """
-        Remueve un nodo de la secuencia de la ruta en construcción.
-        Se llama cuando se deshace la creación de un nodo.
-        """
+        """Remueve un nodo de la secuencia de la ruta en construcción."""
         if not self.activo or not self._nodes_seq:
             return
             
-        print(f"RutaController: Removiendo nodo {nodo_id} de la secuencia")
-        
-        # Buscar el índice del nodo en la secuencia
         nodo_idx = None
         for i, nodo in enumerate(self._nodes_seq):
             if nodo.get('id') == nodo_id:
@@ -298,41 +332,30 @@ class RutaController(QObject):
                 break
         
         if nodo_idx is None:
-            # El nodo no está en la secuencia
             return
         
-        # Remover el nodo de la secuencia
         self._nodes_seq.pop(nodo_idx)
-        
-        # Limpiar todas las líneas temporales
         self._clear_temp_lines()
         
-        # Actualizar last_item si era el nodo eliminado
         if self._last_item and self._last_item.nodo.get('id') == nodo_id:
             if self._nodes_seq:
-                # Buscar el último nodo restante en la escena
                 last_nodo = self._nodes_seq[-1]
                 for item in self.view.marco_trabajo.scene().items():
                     if isinstance(item, NodoItem) and item.nodo.get('id') == last_nodo.get('id'):
                         self._last_item = item
-                        # Restaurar color normal al nuevo último nodo
                         item.set_normal_color()
                         break
             else:
                 self._last_item = None
         
-        # Redibujar líneas temporales si hay al menos 2 nodos restantes
         if len(self._nodes_seq) >= 2:
             self._update_temp_lines()
         
-        # Restaurar colores de todos los nodos restantes
         for nodo in self._nodes_seq:
             for item in self.view.marco_trabajo.scene().items():
                 if isinstance(item, NodoItem) and item.nodo.get('id') == nodo.get('id'):
                     item.set_normal_color()
                     break
-        
-        print(f"  ✓ Nodo removido de secuencia. Nodos restantes: {len(self._nodes_seq)}")
         
     def contiene_nodo_en_secuencia(self, nodo_id):
         """Verifica si un nodo está en la secuencia de construcción actual"""

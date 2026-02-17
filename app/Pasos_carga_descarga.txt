@@ -1,0 +1,44 @@
+0 - Encarar estanteria y levantar horquillas 
+1 - Encarar estanteria
+2 - Girar con ligero avance
+3 - Girar con orientacion empujando carro
+4 - Girar recto
+5 - 
+6 - 
+7 - 
+8 - 
+9 - Detectar Pallet + avanzar hacia estanteria sin movimiento lateral
+10 - Detectar Pallet (movimiento lateral) + avanzar hacia estanteria
+11 - Avanzar hacia hueco detectando posibles obstaculos (descarga)
+12 - Alejarse de la estanteria 
+13 - Avanzar para coger pallet ultimos centimetros
+14 - Avanzar mientras bajo pallet desde altura de deteccion de hueco
+15 - Alejarse de la estanteria mientras centrar horquillas
+16 - Avanzar hacia estanteria sin movimiento lateral
+17 - Avanzar hacia estanteria + movimiento lateral por posicion (sin camara)
+18 - Avanzar hacia hueco detectando larguero
+19 - Avanzar hacia hueco detectando posibles obstaculos sin llegar al fondo	
+20 - Llegar a la altura de levantar carga
+21 - Llegar a la altura de deteccion de hueco
+22 - Llegar a la altura de navegacion
+23 - Llegar a la altura de pallet
+24 - Llegar a la altura de levantar carga extra
+25 - Llegar a altura de detectar larguero
+26 - 
+27 - 
+28 - 
+29 - 
+30 - Detectar que no hay carga
+31 - Calcular desviacion del pallet
+32 - Detectar que hay pallet para coger
+33 - Detectar profundidad de pallet cogido
+34 - Detectar que hay pallet para coger sin laser ( solo camara )
+35 - Detectar fin playa
+36 - 
+37 - 
+38 - 
+39 - 
+40 - Movimiento lateral para dejar
+41 - Centrar horquillas
+42 - Movimiento lateral para cargar
+100 - fin

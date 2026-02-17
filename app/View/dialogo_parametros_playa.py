@@ -55,7 +55,7 @@ class DialogoParametrosPlaya(QDialog):
         
         # Información
         info_label = QLabel(
-            "Cada fila representa un conjunto de parámetros de playa.\n"
+            "Cada fila representa un conjunto de parámetros de playa, que se vincula con la propiedad avanzada 'tipo de carga/descarga' de los objetivos.\n"
             "Las columnas gris claro son propiedades fijas. Puede agregar columnas personalizadas.\n"
             "Cada conjunto debe tener un ID único."
         )
@@ -73,26 +73,11 @@ class DialogoParametrosPlaya(QDialog):
         
         layout_principal.addWidget(self.tabla)
         
-        # Botones para propiedades
-        propiedades_layout = QHBoxLayout()
-        
-        self.btn_agregar_propiedad = QPushButton("Agregar Propiedad Personalizada")
-        self.btn_eliminar_propiedad = QPushButton("Eliminar Propiedad Seleccionada")
-        
-        self.btn_agregar_propiedad.clicked.connect(self.agregar_propiedad_personalizada)
-        self.btn_eliminar_propiedad.clicked.connect(self.eliminar_propiedad_personalizada)
-        
-        propiedades_layout.addWidget(self.btn_agregar_propiedad)
-        propiedades_layout.addWidget(self.btn_eliminar_propiedad)
-        propiedades_layout.addStretch()
-        
-        layout_principal.addLayout(propiedades_layout)
-        
         # Botones para filas
         filas_layout = QHBoxLayout()
         
-        self.btn_agregar_fila = QPushButton("Agregar Playa")
-        self.btn_eliminar_fila = QPushButton("Eliminar Playa Seleccionada")
+        self.btn_agregar_fila = QPushButton("Agregar Fila")
+        self.btn_eliminar_fila = QPushButton("Eliminar Fila Seleccionada")
         
         self.btn_agregar_fila.clicked.connect(self.agregar_playa)
         self.btn_eliminar_fila.clicked.connect(self.eliminar_playa)
