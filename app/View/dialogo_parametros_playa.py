@@ -55,7 +55,7 @@ class DialogoParametrosPlaya(QDialog):
         
         # Información
         info_label = QLabel(
-            "Cada fila representa un conjunto de parámetros de playa, que se vincula con la propiedad avanzada 'tipo de carga/descarga' de los objetivos.\n"
+            "Cada fila representa un conjunto de parámetros de playa, que se vincula con la propiedad avanzada 'número playa' de los objetivos.\n"
             "Las columnas gris claro son propiedades fijas. Puede agregar columnas personalizadas.\n"
             "Cada conjunto debe tener un ID único."
         )

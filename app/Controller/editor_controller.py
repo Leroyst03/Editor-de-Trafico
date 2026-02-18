@@ -30,6 +30,7 @@ class EditorController(QObject):
         self._arrastrando_nodo = False  # Para rastrear si estamos arrastrando un nodo
 
         self._conectar_señales_proyecto()
+        self._arrastrando_mapa_con_izquierdo = False
 
         # --- Inicializar escena con padre ---
         self.scene = QGraphicsScene(self.view.marco_trabajo)
@@ -3034,7 +3035,7 @@ class EditorController(QObject):
                     nodo_actual = self._obtener_nodo_actual(nodo_id)
                     if nodo_actual:
                         # Obtener el valor actual de es_curva (convertir a entero)
-                        raw = nodo_actual.get('es_curva', 0)
+                        raw = nodo_actual.get('Tipo_curva', 0)
                         try:
                             es_curva_valor = int(raw)
                         except (ValueError, TypeError):
@@ -4027,7 +4028,7 @@ class EditorController(QObject):
                 if nodo_id_dest is not None:
                     nodo_actual = self._obtener_nodo_actual(nodo_id_dest)
                     if nodo_actual:
-                        raw = nodo_actual.get('es_curva', 0)
+                        raw = nodo_actual.get('Tipo_curva', 0)
                         try:
                             es_curva_valor = int(raw)
                         except (ValueError, TypeError):
@@ -5375,51 +5376,77 @@ class EditorController(QObject):
         if event.type() == QEvent.KeyPress:
             self.keyPressEvent(event)
             return True
-        
+
+        # Detectar movimiento del ratón para actualizar cursor dinámicamente
+        if event.type() == QEvent.MouseMove:
+            pos = self.view.marco_trabajo.mapToScene(event.pos())
+            items = self.scene.items(pos)
+            hay_nodo = any(isinstance(it, NodoItem) for it in items)
+
+            if hay_nodo and not self._cursor_sobre_nodo:
+                self._cursor_sobre_nodo = True
+                self._actualizar_cursor()
+            elif not hay_nodo and self._cursor_sobre_nodo:
+                self._cursor_sobre_nodo = False
+                self._actualizar_cursor()
+
         # Detectar click izquierdo en el viewport
         if event.type() == QEvent.MouseButtonPress:
-            # Mapear a escena
             pos = self.view.marco_trabajo.mapToScene(event.pos())
-            
-            # PRIMERO: Si estamos en modo ruta o modo colocar, NO manejar el clic aquí
-            # Los controladores respectivos manejarán los clics a través de su eventFilter
-            if self.modo_actual in ["ruta", "colocar"]:
-                return False  # Dejar que el controlador respectivo maneje el clic
-            
-            if event.button() == Qt.MiddleButton:
-                return False # Dejar que el evento pase a ZoomGraphicsView
-
-            # SEGUNDO: Comportamiento normal (solo si NO estamos en modo ruta o colocar)
             items = self.scene.items(pos)
-            if not any(isinstance(it, NodoItem) for it in items):
-                # deseleccionar items de la escena
+            hay_nodo = any(isinstance(it, NodoItem) for it in items)
+
+            # --- MODO MOVER: comportamiento dual con botón izquierdo ---
+            if self.modo_actual == "mover" and event.button() == Qt.LeftButton:
+                if not hay_nodo:
+                    # Clic en fondo: activar arrastre del mapa (navegación)
+                    self.view.marco_trabajo.setDragMode(self.view.marco_trabajo.ScrollHandDrag)
+                    self._arrastrando_mapa_con_izquierdo = True
+                    return False  # Dejar que el viewport procese el evento
+                else:
+                    # Clic sobre un nodo: no intervenimos (el nodo se encarga)
+                    return False
+
+            # --- OTROS MODOS (ruta, colocar): dejar que los controladores respectivos manejen el clic ---
+            if self.modo_actual in ["ruta", "colocar"]:
+                return False
+
+            # --- COMPORTAMIENTO NORMAL (cuando NO estamos en modo ruta o colocar) ---
+            if not hay_nodo:
+                # Resetear estados de cursor
+                if self._arrastrando_nodo:
+                    self._arrastrando_nodo = False
+                self._cursor_sobre_nodo = False
+                self._actualizar_cursor()
+
+                # Deseleccionar items en la escena
                 try:
                     for it in self.scene.selectedItems():
                         it.setSelected(False)
                 except Exception:
                     pass
-                
-                # Restaurar z-values normales a todos los nodos
+
+                # Restaurar z-values normales
                 for item in self.scene.items():
                     if isinstance(item, NodoItem):
                         item.setZValue(1)
-                    
-                # deseleccionar lista de nodos
+
+                # Deseleccionar lista de nodos
                 try:
                     self.view.nodosList.clearSelection()
                 except Exception:
                     pass
-                
-                # deseleccionar lista de rutas y limpiar highlights
+
+                # Deseleccionar lista de rutas y limpiar highlights
                 try:
                     if hasattr(self.view, "rutasList"):
                         self.view.rutasList.clearSelection()
                 except Exception:
                     pass
-                
+
                 self._clear_highlight_lines()
-                
-                # limpiar propertiesTable
+
+                # Limpiar tabla de propiedades
                 try:
                     self.view.propertiesTable.clear()
                     self.view.propertiesTable.setRowCount(0)
@@ -5427,11 +5454,28 @@ class EditorController(QObject):
                     self.view.propertiesTable.setHorizontalHeaderLabels(["Propiedad", "Valor"])
                 except Exception:
                     pass
-                
-                # Restaurar colores de nodos
+
+                # Restaurar colores normales de todos los nodos
                 for item in self.scene.items():
                     if isinstance(item, NodoItem):
                         item.set_normal_color()
+
+        # Detectar liberación del botón del ratón
+        if event.type() == QEvent.MouseButtonRelease:
+            if event.button() == Qt.LeftButton and self._arrastrando_mapa_con_izquierdo:
+                # Finalizar arrastre de mapa: restaurar dragMode y actualizar cursor
+                if self.modo_actual == "mover":
+                    self.view.marco_trabajo.setDragMode(self.view.marco_trabajo.NoDrag)
+                self._arrastrando_mapa_con_izquierdo = False
+                self._actualizar_cursor()
+
+            # Resetear estado de arrastre de nodo si aún está activo
+            if self._arrastrando_nodo:
+                self._arrastrando_nodo = False
+                self._actualizar_cursor()
+
+            return False
+
         return False
     
     # --- OBSERVER PATTERN: MÉTODOS PARA ACTUALIZACIÓN AUTOMÁTICA ---

@@ -58,7 +58,8 @@ class DialogoParametrosCargaDescarga(QDialog):
         
         # Información
         info_label = QLabel(
-            "Cada fila representa un conjunto de parámetros de carga/descarga.\n"
+            "Cada fila representa un conjunto de parámetros de carga/descarga, que se vincula con la propiedad avanzada 'tipo de carga/descarga' de los objetivos.\n"
+            "Las columnas gris claro son propiedades fijas..\n"
             "Las columnas son propiedades fijas (ID y p_a a p_t). Puede agregar columnas personalizadas.\n"
             "Cada conjunto debe tener un ID único."
         )

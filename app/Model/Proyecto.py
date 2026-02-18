@@ -17,9 +17,9 @@ class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
         self.mapa = mapa
         self.nodos = nodos if nodos is not None else []
         self.rutas = rutas if rutas is not None else []
-        self.parametros = self._parametros_por_defecto()  # atributo parámetros
-        self.parametros_playa = []  # Parámetros específicos de playa
-        self.parametros_carga_descarga = []  # NUEVO: Parámetros de carga/descarga
+        self.parametros = self._parametros_por_defecto()
+        self.parametros_playa = self._parametros_playa_por_defecto()   # ← ahora con datos
+        self.parametros_carga_descarga = self._parametros_carga_descarga_por_defecto()   # ← ahora con datos
 
     def _parametros_por_defecto(self):
         """Devuelve los parámetros por defecto del sistema"""
@@ -105,7 +105,6 @@ class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
             "Puerta_Abrir": 0,
             "Puerta_Cerrar": 0,
             "Punto_espera": 0,
-            "es_curva": 0
         }
         nodo = Nodo(datos)
         self.nodos.append(nodo)
