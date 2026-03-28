@@ -1,6 +1,8 @@
+# -*- coding: utf-8 -*-
 import json
-from Model.Nodo import Nodo
 from PyQt5.QtCore import QObject, pyqtSignal
+from Model.Nodo import Nodo
+from .schema import PARAMETROS_FIELDS, PLAYA_DEFAULT_FIELDS, CARGA_DESC_DEFAULT_FIELDS
 
 class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
     # Señales para notificar cambios
@@ -22,65 +24,70 @@ class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
         self.parametros_carga_descarga = self._parametros_carga_descarga_por_defecto()   # ← ahora con datos
 
     def _parametros_por_defecto(self):
-        """Devuelve los parámetros por defecto del sistema"""
-        return {
-            "G_AGV_ID": 2,
-            "G_thres_error_angle": 5,
-            "G_dist_larguero": 0,
-            "G_pulsos_por_grado_encoder": 15,
-            "G_LAT_OFF": 905,
-            "G_lateral_centro": 47,
-            "G_LAT_MAX": 1006,
-            "G_TACO_OFF": 76,
-            "G_ALT_OFF": 184,
-            "G_PUNTO_CARGADOR": 75,
-            "G_PUNTO_CARGADOR_": 75,
-            "G_offset_Lidar": 2,
-            "G_t_stop_aprox_big": 0,
-            "G_stop_r": 0,
-            "G_PAL_L_P_off": 0,
-            "G_PAL_A_P_off_peso": 0
-        }
+        """Devuelve los parámetros por defecto del sistema usando el esquema"""
+        return {k: v['default'] for k, v in PARAMETROS_FIELDS.items()}
     
     def _parametros_carga_descarga_por_defecto(self):
         """Devuelve los parámetros de carga/descarga por defecto"""
-        return [
-            {
-                "ID": 0,
-                "p_a": 100, "p_b": -1, "p_c": -1, "p_d": -1, "p_e": -1,
-                "p_f": -1, "p_g": -1, "p_h": -1, "p_i": -1, "p_j": -1,
-                "p_k": -1, "p_l": -1, "p_m": -1, "p_n": -1, "p_o": -1,
-                "p_p": -1, "p_q": -1, "p_r": -1, "p_s": -1, "p_t": -1
-            },
-            {
-                "ID": 1,
-                "p_a": 0, "p_b": 32, "p_c": 16, "p_d": 2, "p_e": 13,
-                "p_f": 20, "p_g": 12, "p_h": 31, "p_i": 22, "p_j": 100,
-                "p_k": -1, "p_l": -1, "p_m": -1, "p_n": -1, "p_o": -1,
-                "p_p": -1, "p_q": -1, "p_r": -1, "p_s": -1, "p_t": -1
-            },
-            {
-                "ID": 2,
-                "p_a": 0, "p_b": 30, "p_c": 33, "p_d": 25, "p_e": 19,
-                "p_f": 18, "p_g": 4, "p_h": 23, "p_i": 12, "p_j": 22,
-                "p_k": 100, "p_l": -1, "p_m": -1, "p_n": -1, "p_o": -1,
-                "p_p": -1, "p_q": -1, "p_r": -1, "p_s": -1, "p_t": -1
-            }
-        ]
+        # Generar tres ejemplos con valores por defecto
+        base = {campo: -1 for campo in CARGA_DESC_DEFAULT_FIELDS}
+        # Personalizar algunos valores según el original
+        ejemplos = []
+        # ID 0
+        ej0 = base.copy()
+        ej0['ID'] = 0
+        # Asignar algunos valores personalizados (como en el original)
+        for k, v in {'p_a': 100, 'p_b': -1, 'p_c': -1, 'p_d': -1, 'p_e': -1,
+                     'p_f': -1, 'p_g': -1, 'p_h': -1, 'p_i': -1, 'p_j': -1,
+                     'p_k': -1, 'p_l': -1, 'p_m': -1, 'p_n': -1, 'p_o': -1,
+                     'p_p': -1, 'p_q': -1, 'p_r': -1, 'p_s': -1, 'p_t': -1}.items():
+            if k in ej0:
+                ej0[k] = v
+        ejemplos.append(ej0)
+
+        # ID 1
+        ej1 = base.copy()
+        ej1['ID'] = 1
+        for k, v in {'p_a': 0, 'p_b': 32, 'p_c': 16, 'p_d': 2, 'p_e': 13,
+                     'p_f': 20, 'p_g': 12, 'p_h': 31, 'p_i': 22, 'p_j': 100,
+                     'p_k': -1, 'p_l': -1, 'p_m': -1, 'p_n': -1, 'p_o': -1,
+                     'p_p': -1, 'p_q': -1, 'p_r': -1, 'p_s': -1, 'p_t': -1}.items():
+            if k in ej1:
+                ej1[k] = v
+        ejemplos.append(ej1)
+
+        # ID 2
+        ej2 = base.copy()
+        ej2['ID'] = 2
+        for k, v in {'p_a': 0, 'p_b': 30, 'p_c': 33, 'p_d': 25, 'p_e': 19,
+                     'p_f': 18, 'p_g': 4, 'p_h': 23, 'p_i': 12, 'p_j': 22,
+                     'p_k': 100, 'p_l': -1, 'p_m': -1, 'p_n': -1, 'p_o': -1,
+                     'p_p': -1, 'p_q': -1, 'p_r': -1, 'p_s': -1, 'p_t': -1}.items():
+            if k in ej2:
+                ej2[k] = v
+        ejemplos.append(ej2)
+
+        return ejemplos
     
     def _parametros_playa_por_defecto(self):
         """Devuelve los parámetros de playa por defecto"""
-        return [{
-            "ID": 1,
-            "Vertical": 0,
-            "Columnas": 10,
-            "Filas": 10,
-            "Pose_num": 0,
-            "Detectar_con_lidar_seguirdad": 0,
-            "Id_col": 1,
-            "Id_row": 1,
-            "ref_final": 0
-        }]
+        base = {campo: 0 for campo in PLAYA_DEFAULT_FIELDS}
+        base['ID'] = 1
+        # Personalizar con los valores originales
+        valores_originales = {
+            'Vertical': 0,
+            'Columnas': 10,
+            'Filas': 10,
+            'Pose_num': 0,
+            'Detectar_con_lidar_seguirdad': 0,
+            'Id_col': 1,
+            'Id_row': 1,
+            'ref_final': 0
+        }
+        for k, v in valores_originales.items():
+            if k in base:
+                base[k] = v
+        return [base]
 
     def agregar_nodo(self, x, y):
         """Crea un nodo con atributos iniciales y lo añade al proyecto."""
@@ -90,22 +97,8 @@ class Proyecto(QObject):  # Ahora hereda de QObject para usar señales
             "id": nuevo_id,
             "X": x,
             "Y": y,
-            "A": 0,
-            "Vmax": 0,
-            "Seguridad": 0,
-            "Seg_alto": 0,
-            "Seg_tresD": 0,
-            "Tipo_curva": 0,
-            "Reloc": 0,
-            "objetivo": 0,
-            "decision": 0,
-            "timeout": 0,
-            "ultimo_metro": 0,
-            "es_cargador": 0,
-            "Puerta_Abrir": 0,
-            "Puerta_Cerrar": 0,
-            "Punto_espera": 0,
         }
+        # No es necesario incluir todos los campos, ya que Nodo los inicializa con defaults.
         nodo = Nodo(datos)
         self.nodos.append(nodo)
         

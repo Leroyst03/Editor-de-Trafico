@@ -15,6 +15,7 @@ from View.view import NodoListItemWidget, RutaListItemWidget
 from View.node_item import NodoItem
 import ast
 import copy
+from Model.schema import NODO_FIELDS, OBJETIVO_FIELDS
 
 class EditorController(QObject):
     def __init__(self, view, proyecto=None):
@@ -3087,12 +3088,11 @@ class EditorController(QObject):
 
             propiedades = nodo.to_dict() if hasattr(nodo, "to_dict") else nodo
             
-            # Filtrar propiedades básicas (excluyendo las de objetivo)
-            propiedades_basicas = ["X", "Y", "A", "Vmax", "Seguridad", "Seg_alto", 
-                                "Seg_tresD", "Tipo_curva", "Reloc", "objetivo", 
-                                "decision", "timeout", "ultimo_metro", "es_cargador",
-                                "Puerta_Abrir", "Puerta_Cerrar", "Punto_espera", "es_curva"]
-            
+            # Obtener claves de NODO_FIELDS que no son 'id' ni pertenecen a OBJETIVO_FIELDS
+            # (los campos de objetivo se muestran en el diálogo avanzado)
+            claves_basicas = [k for k in NODO_FIELDS.keys() if k != 'id' and k not in OBJETIVO_FIELDS]
+            propiedades_basicas = claves_basicas
+                        
             # Filtrar también las propiedades de objetivo para no mostrarlas aquí
             claves_filtradas = [k for k in propiedades_basicas if k in propiedades]
 

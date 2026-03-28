@@ -1,6 +1,8 @@
+# -*- coding: utf-8 -*-
 import sqlite3
-from PyQt5.QtWidgets import QFileDialog, QMessageBox
 import os
+from PyQt5.QtWidgets import QFileDialog, QMessageBox
+from .schema import NODO_FIELDS, OBJETIVO_FIELDS, PARAMETROS_FIELDS
 
 class ExportadorDB:
     @staticmethod
@@ -67,106 +69,66 @@ class ExportadorDB:
 
         # --- CONTINUAR CON LA EXPORTACIÓN NORMAL ---
         try:
-            # --- Exportar nodos (puntos básicos) ---
+            # --- Exportar nodos (puntos básicos) usando esquema ---
             conn_nodos = sqlite3.connect(os.path.join(carpeta, "puntos.db"))
             cursor_nodos = conn_nodos.cursor()
 
-            # Eliminar tabla si existe para evitar conflictos de clave única
+            # Eliminar tabla si existe
             cursor_nodos.execute("DROP TABLE IF EXISTS nodos")
-            # Crear tabla de nodos con TODOS los campos del modelo
-            cursor_nodos.execute("""
-                CREATE TABLE nodos (
-                    id INTEGER PRIMARY KEY,
-                    X REAL,
-                    Y REAL,
-                    objetivo INTEGER,
-                    A REAL,
-                    Vmax REAL,
-                    Seguridad REAL,
-                    Seg_alto REAL,
-                    Seg_tresD REAL,
-                    Tipo_curva INTEGER,
-                    Reloc INTEGER,
-                    decision INTEGER,
-                    timeout INTEGER,
-                    ultimo_metro INTEGER,
-                    es_cargador INTEGER,
-                    Puerta_Abrir INTEGER,
-                    Puerta_Cerrar INTEGER,
-                    Punto_espera INTEGER,
-                    es_curva INTEGER
-                )
-            """)
 
-            # Insertar nodos (convertir coordenadas a metros)
+            # Construir CREATE TABLE dinámico según NODO_FIELDS
+            column_defs = []
+            for key, info in NODO_FIELDS.items():
+                col_name = info.get('csv_name', key)
+                db_type = info.get('db_type', 'TEXT')
+                # Ajustar PRIMARY KEY si es id
+                if key == 'id':
+                    # Quitar 'PRIMARY KEY' si ya está incluido en db_type y añadirlo al final
+                    if 'PRIMARY KEY' in db_type:
+                        db_type = db_type.replace('PRIMARY KEY', '').strip()
+                    column_defs.append(f"{col_name} {db_type} PRIMARY KEY")
+                else:
+                    column_defs.append(f"{col_name} {db_type}")
+            create_sql = f"CREATE TABLE nodos ({', '.join(column_defs)})"
+            cursor_nodos.execute(create_sql)
+
+            # Insertar datos
             for nodo in proyecto.nodos:
                 if hasattr(nodo, 'to_dict'):
                     datos = nodo.to_dict()
                 else:
                     datos = nodo
 
-                x_px = datos.get('X', 0)
-                y_px = datos.get('Y', 0)
-                x_m = x_px * escala
-                y_m = y_px * escala
+                valores = []
+                for key, info in NODO_FIELDS.items():
+                    col_name = info.get('csv_name', key)
+                    valor = datos.get(key, info['default'])
+                    if key == 'X' or key == 'Y':
+                        valor = valor * escala
+                    valores.append(valor)
 
-                cursor_nodos.execute("""
-                    INSERT INTO nodos (id, X, Y, objetivo, A, Vmax, Seguridad,
-                                     Seg_alto, Seg_tresD, Tipo_curva, Reloc,
-                                     decision, timeout, ultimo_metro,
-                                     es_cargador, Puerta_Abrir, Puerta_Cerrar,
-                                     Punto_espera, es_curva)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    datos.get('id'),
-                    x_m,
-                    y_m,
-                    datos.get('objetivo', 0),
-                    datos.get('A', 0),
-                    datos.get('Vmax', 0),
-                    datos.get('Seguridad', 0),
-                    datos.get('Seg_alto', 0),
-                    datos.get('Seg_tresD', 0),
-                    datos.get('Tipo_curva', 0),
-                    datos.get('Reloc', 0),
-                    datos.get('decision', 0),
-                    datos.get('timeout', 0),
-                    datos.get('ultimo_metro', 0),
-                    datos.get('es_cargador', 0),
-                    datos.get('Puerta_Abrir', 0),
-                    datos.get('Puerta_Cerrar', 0),
-                    datos.get('Punto_espera', 0),
-                    datos.get('es_curva', 0)
-                ))
+                placeholders = ','.join(['?' for _ in NODO_FIELDS])
+                insert_sql = f"INSERT INTO nodos VALUES ({placeholders})"
+                cursor_nodos.execute(insert_sql, valores)
 
             conn_nodos.commit()
             conn_nodos.close()
 
-            # --- Exportar objetivos (propiedades avanzadas) ---
+            # --- Exportar objetivos (nodos con objetivo != 0) ---
             if os.path.join(carpeta, "objetivos.db") in rutas_a_generar:
                 conn_objetivos = sqlite3.connect(os.path.join(carpeta, "objetivos.db"))
                 cursor_objetivos = conn_objetivos.cursor()
 
                 cursor_objetivos.execute("DROP TABLE IF EXISTS objetivos")
-                cursor_objetivos.execute("""
-                    CREATE TABLE objetivos (
-                        nodo_id INTEGER PRIMARY KEY,
-                        objetivo INTEGER,
-                        Pasillo INTEGER,
-                        Estanteria INTEGER,
-                        Altura INTEGER,
-                        Altura_en_mm INTEGER,
-                        Punto_Pasillo INTEGER,
-                        Punto_encarar INTEGER,
-                        Punto_desaproximar INTEGER,
-                        FIFO INTEGER,
-                        Nombre TEXT,
-                        Presicion INTEGER,
-                        Ir_a_desicion INTEGER,
-                        numero_playa INTEGER,
-                        tipo_carga_descarga INTEGER
-                    )
-                """)
+
+                # Construir tabla con campo nodo_id y los campos de OBJETIVO_FIELDS
+                column_defs = ["nodo_id INTEGER PRIMARY KEY"]
+                for key, info in OBJETIVO_FIELDS.items():
+                    col_name = info.get('csv_name', key)
+                    db_type = info.get('db_type', 'TEXT')
+                    column_defs.append(f"{col_name} {db_type}")
+                create_sql = f"CREATE TABLE objetivos ({', '.join(column_defs)})"
+                cursor_objetivos.execute(create_sql)
 
                 for nodo in proyecto.nodos:
                     if hasattr(nodo, 'to_dict'):
@@ -174,35 +136,19 @@ class ExportadorDB:
                     else:
                         datos = nodo
 
-                    if datos.get("objetivo", 0) != 0:
-                        cursor_objetivos.execute("""
-                            INSERT INTO objetivos (nodo_id, objetivo, Pasillo, Estanteria, Altura,
-                                                Altura_en_mm, Punto_Pasillo, Punto_encarar,
-                                                Punto_desaproximar, FIFO, Nombre, Presicion,
-                                                Ir_a_desicion, numero_playa, tipo_carga_descarga)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (
-                            datos.get('id'),
-                            datos.get('objetivo', 0),
-                            datos.get('Pasillo', 0),
-                            datos.get('Estanteria', 0),
-                            datos.get('Altura', 0),
-                            datos.get('Altura_en_mm', 0),
-                            datos.get('Punto_Pasillo', 0),
-                            datos.get('Punto_Escara', 0),  # Mapeado a Punto_encarar
-                            datos.get('Punto_desapr', 0),  # Mapeado a Punto_desaproximar
-                            datos.get('FIFO', 0),
-                            datos.get('Nombre', ''),
-                            datos.get('Presicion', 0),
-                            datos.get('Ir_a_desicion', 0),
-                            datos.get('numero_playa', 0),
-                            datos.get('tipo_carga_descarga', 0)
-                        ))
+                    if datos.get('objetivo', 0) != 0:
+                        valores = [datos.get('id')]
+                        for key, info in OBJETIVO_FIELDS.items():
+                            valor = datos.get(key, info['default'])
+                            valores.append(valor)
+                        placeholders = ','.join(['?' for _ in range(len(valores))])
+                        insert_sql = f"INSERT INTO objetivos VALUES ({placeholders})"
+                        cursor_objetivos.execute(insert_sql, valores)
 
                 conn_objetivos.commit()
                 conn_objetivos.close()
 
-            # --- Exportar rutas ---
+            # --- Exportar rutas (estructura fija, no usa esquema) ---
             conn_rutas = sqlite3.connect(os.path.join(carpeta, "rutas.db"))
             cursor_rutas = conn_rutas.cursor()
 
@@ -252,7 +198,7 @@ class ExportadorDB:
             conn_rutas.commit()
             conn_rutas.close()
 
-            # --- Exportar parámetros de playa ---
+            # --- Exportar parámetros de playa (dinámico, igual que antes) ---
             if os.path.join(carpeta, "playas.db") in rutas_a_generar:
                 parametros_playa = getattr(proyecto, 'parametros_playa', [])
                 if parametros_playa:
@@ -299,7 +245,7 @@ class ExportadorDB:
                     conn_playa.commit()
                     conn_playa.close()
 
-            # --- Exportar parámetros generales ---
+            # --- Exportar parámetros generales (usando esquema, pero simple clave-valor) ---
             if os.path.join(carpeta, "parametros.db") in rutas_a_generar:
                 parametros = getattr(proyecto, 'parametros', {})
                 if parametros:
@@ -323,7 +269,7 @@ class ExportadorDB:
                     conn_param.commit()
                     conn_param.close()
 
-            # --- Exportar tipo_carga_descarga ---
+            # --- Exportar tipo_carga_descarga (dinámico, igual que antes) ---
             if os.path.join(carpeta, "tipo_carga_descarga.db") in rutas_a_generar:
                 parametros_carga_descarga = getattr(proyecto, 'parametros_carga_descarga', [])
                 if parametros_carga_descarga:

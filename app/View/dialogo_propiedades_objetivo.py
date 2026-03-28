@@ -1,7 +1,8 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QLineEdit, QSpinBox, QPushButton,
-                             QFormLayout, QGroupBox, QFrame, QWidget)
+                             QLineEdit, QSpinBox, QDoubleSpinBox, QPushButton,
+                             QFormLayout, QGroupBox, QFrame, QWidget, QScrollArea)
 from PyQt5.QtCore import Qt
+from Model.schema import OBJETIVO_FIELDS
 
 class DialogoPropiedadesObjetivo(QDialog):
     def __init__(self, parent=None, propiedades=None):
@@ -9,7 +10,7 @@ class DialogoPropiedadesObjetivo(QDialog):
         self.setWindowTitle("Propiedades de Objetivo")
         self.setMinimumWidth(450)
         
-        # Configurar estilo para mejor visibilidad
+        # Estilos mejorados
         self.setStyleSheet("""
             QDialog {
                 background-color: #2b2b2b;
@@ -18,210 +19,216 @@ class DialogoPropiedadesObjetivo(QDialog):
             QGroupBox {
                 background-color: #3c3c3c;
                 border: 1px solid #555555;
-                border-radius: 4px;
-                margin-top: 10px;
-                padding-top: 10px;
-                color: #ffffff;
+                border-radius: 5px;
+                margin-top: 12px;
+                padding-top: 12px;
                 font-weight: bold;
+                color: #ffffff;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 left: 10px;
-                padding: 0 5px 0 5px;
-                color: #ffffff;
+                padding: 0 8px 0 8px;
+                background-color: #2b2b2b;
+                color: #ffaa00;
+                font-weight: bold;
             }
             QLabel {
-                color: #ffffff;
-                min-width: 120px;
+                color: #e0e0e0;
+                min-width: 130px;
+                font-weight: normal;
+                padding: 4px;
             }
-            QSpinBox, QLineEdit {
+            QSpinBox, QDoubleSpinBox, QLineEdit {
                 background-color: #4a4a4a;
                 color: #ffffff;
-                border: 1px solid #555555;
+                border: 1px solid #6a6a6a;
                 border-radius: 3px;
-                padding: 3px;
-                min-width: 80px;
+                padding: 4px;
+                min-width: 100px;
+                selection-background-color: #ffaa00;
+            }
+            QSpinBox:focus, QDoubleSpinBox:focus, QLineEdit:focus {
+                border: 1px solid #ffaa00;
+                background-color: #5a5a5a;
             }
             QPushButton {
                 background-color: #5a5a5a;
                 color: #ffffff;
-                border: 1px solid #555555;
-                border-radius: 3px;
-                padding: 5px 15px;
-                min-width: 80px;
+                border: 1px solid #6a6a6a;
+                border-radius: 4px;
+                padding: 6px 16px;
+                min-width: 90px;
             }
             QPushButton:hover {
                 background-color: #6a6a6a;
+                border-color: #ffaa00;
+            }
+            QPushButton:default {
+                background-color: #ffaa00;
+                color: #2b2b2b;
+                border-color: #ffaa00;
+            }
+            QScrollArea {
+                border: none;
+                background-color: transparent;
+            }
+            QScrollBar:vertical {
+                background-color: #2b2b2b;
+                width: 12px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #5a5a5a;
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #ffaa00;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                border: none;
+                background: none;
             }
         """)
         
         if propiedades is None:
             propiedades = {}
         
+        # Diccionario para almacenar los widgets dinámicos
+        self.widgets = {}
+        
+        # Definir a qué grupo pertenece cada clave (si no está en ninguna, irá a "Otros")
+        grupos = {
+            "Ubicación": ["Pasillo", "Estanteria"],
+            "Altura": ["Altura", "Altura_en_mm"],
+            "Puntos de Referencia": ["Punto_Pasillo", "Punto_Escara", "Punto_desapr"],
+            "Operación": ["FIFO", "Nombre", "Presicion", "Ir_a_desicion", "tipo_carga_descarga"],
+            "Configuración Playa": ["numero_playa"]
+        }
+        
+        # Layout principal con scroll
         layout_principal = QVBoxLayout()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(12)
+        scroll_layout.setContentsMargins(10, 10, 10, 10)
         
-        # Crear un widget con scroll si es necesario
-        scroll_widget = QWidget()
-        scroll_layout = QVBoxLayout(scroll_widget)
+        # --- Crear grupos dinámicamente ---
+        for grupo_nombre, claves in grupos.items():
+            if not claves:
+                continue
+            # Crear grupo
+            grupo = QGroupBox(grupo_nombre)
+            form_layout = QFormLayout()
+            form_layout.setLabelAlignment(Qt.AlignRight)
+            form_layout.setSpacing(8)
+            form_layout.setContentsMargins(10, 15, 10, 10)
+            
+            # Añadir cada campo del grupo
+            for clave in claves:
+                if clave not in OBJETIVO_FIELDS:
+                    continue  # Si la clave no está en el esquema, se omite
+                
+                info = OBJETIVO_FIELDS[clave]
+                valor_actual = propiedades.get(clave, info['default'])
+                
+                # Crear widget según el tipo
+                if info['type'] == int:
+                    widget = QSpinBox()
+                    widget.setRange(-999999, 999999)
+                    widget.setValue(int(valor_actual))
+                elif info['type'] == float:
+                    widget = QDoubleSpinBox()
+                    widget.setRange(-999999.0, 999999.0)
+                    widget.setValue(float(valor_actual))
+                else:
+                    widget = QLineEdit()
+                    widget.setText(str(valor_actual))
+                
+                # Guardar el widget para después recuperar su valor
+                self.widgets[clave] = widget
+                
+                # Usar el nombre de la columna CSV como etiqueta si existe, sino la clave
+                etiqueta = info.get('csv_name', clave)
+                # Añadir un QLabel personalizado para forzar estilo si es necesario
+                label = QLabel(etiqueta + ":")
+                label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                form_layout.addRow(label, widget)
+            
+            grupo.setLayout(form_layout)
+            scroll_layout.addWidget(grupo)
         
-        # --- GRUPO 1: Ubicación ---
-        grupo_ubicacion = QGroupBox("Ubicación")
-        layout_ubicacion = QFormLayout()
-        layout_ubicacion.setLabelAlignment(Qt.AlignRight)
+        # --- Grupo "Otros" para las claves que no estén en ningún grupo ---
+        todas_claves = set(OBJETIVO_FIELDS.keys())
+        claves_agrupadas = set()
+        for claves_grupo in grupos.values():
+            claves_agrupadas.update(claves_grupo)
+        otras_claves = todas_claves - claves_agrupadas
         
-        self.spin_pasillo = QSpinBox()
-        self.spin_pasillo.setRange(0, 1000)
-        self.spin_pasillo.setValue(propiedades.get("Pasillo", 0))
-        layout_ubicacion.addRow("Pasillo:", self.spin_pasillo)
+        if otras_claves:
+            grupo_otros = QGroupBox("Otros")
+            form_otros = QFormLayout()
+            form_otros.setLabelAlignment(Qt.AlignRight)
+            form_otros.setSpacing(8)
+            form_otros.setContentsMargins(10, 15, 10, 10)
+            for clave in sorted(otras_claves):
+                info = OBJETIVO_FIELDS[clave]
+                valor_actual = propiedades.get(clave, info['default'])
+                if info['type'] == int:
+                    widget = QSpinBox()
+                    widget.setRange(-999999, 999999)
+                    widget.setValue(int(valor_actual))
+                elif info['type'] == float:
+                    widget = QDoubleSpinBox()
+                    widget.setRange(-999999.0, 999999.0)
+                    widget.setValue(float(valor_actual))
+                else:
+                    widget = QLineEdit()
+                    widget.setText(str(valor_actual))
+                self.widgets[clave] = widget
+                etiqueta = info.get('csv_name', clave)
+                label = QLabel(etiqueta + ":")
+                label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                form_otros.addRow(label, widget)
+            grupo_otros.setLayout(form_otros)
+            scroll_layout.addWidget(grupo_otros)
         
-        self.spin_estanteria = QSpinBox()
-        self.spin_estanteria.setRange(0, 1000)
-        self.spin_estanteria.setValue(propiedades.get("Estanteria", 0))
-        layout_ubicacion.addRow("Estantería:", self.spin_estanteria)
+        scroll.setWidget(scroll_content)
+        layout_principal.addWidget(scroll)
         
-        grupo_ubicacion.setLayout(layout_ubicacion)
-        scroll_layout.addWidget(grupo_ubicacion)
-        
-        # --- GRUPO 2: Altura ---
-        grupo_altura = QGroupBox("Altura")
-        layout_altura = QFormLayout()
-        layout_altura.setLabelAlignment(Qt.AlignRight)
-        
-        self.spin_altura = QSpinBox()
-        self.spin_altura.setRange(0, 10)
-        self.spin_altura.setValue(propiedades.get("Altura", 0))
-        layout_altura.addRow("Nivel:", self.spin_altura)
-        
-        self.spin_altura_mm = QSpinBox()
-        self.spin_altura_mm.setRange(0, 10000)
-        self.spin_altura_mm.setValue(propiedades.get("Altura_en_mm", 0))
-        layout_altura.addRow("Altura en mm:", self.spin_altura_mm)
-        
-        grupo_altura.setLayout(layout_altura)
-        scroll_layout.addWidget(grupo_altura)
-        
-        # --- GRUPO 3: Puntos de Referencia ---
-        grupo_puntos = QGroupBox("Puntos de Referencia")
-        layout_puntos = QFormLayout()
-        layout_puntos.setLabelAlignment(Qt.AlignRight)
-        
-        self.spin_punto_pasillo = QSpinBox()
-        self.spin_punto_pasillo.setRange(0, 1000)
-        self.spin_punto_pasillo.setValue(propiedades.get("Punto_Pasillo", 0))
-        layout_puntos.addRow("Punto Pasillo:", self.spin_punto_pasillo)
-        
-        self.spin_punto_escara = QSpinBox()
-        self.spin_punto_escara.setRange(0, 1000)
-        self.spin_punto_escara.setValue(propiedades.get("Punto_Escara", 0))
-        layout_puntos.addRow("Punto Encarar", self.spin_punto_escara)
-        
-        self.spin_punto_desapr = QSpinBox()
-        self.spin_punto_desapr.setRange(0, 1000)
-        self.spin_punto_desapr.setValue(propiedades.get("Punto_desapr", 0))
-        layout_puntos.addRow("Punto Desaproximar:", self.spin_punto_desapr)
-        
-        grupo_puntos.setLayout(layout_puntos)
-        scroll_layout.addWidget(grupo_puntos)
-        
-        # --- GRUPO 4: Operación ---
-        grupo_operacion = QGroupBox("Operación")
-        layout_operacion = QFormLayout()
-        layout_operacion.setLabelAlignment(Qt.AlignRight)
-        
-        self.spin_fifo = QSpinBox()
-        self.spin_fifo.setRange(0, 1)
-        self.spin_fifo.setValue(propiedades.get("FIFO", 0))
-        layout_operacion.addRow("FIFO (0/1):", self.spin_fifo)
-        
-        self.edit_nombre = QLineEdit()
-        self.edit_nombre.setText(propiedades.get("Nombre", ""))
-        layout_operacion.addRow("Nombre:", self.edit_nombre)
-        
-        self.spin_presicion = QSpinBox()
-        self.spin_presicion.setRange(0, 100)
-        self.spin_presicion.setValue(propiedades.get("Presicion", 0))
-        layout_operacion.addRow("Precisión:", self.spin_presicion)
-        
-        self.spin_ir_a_desicion = QSpinBox()
-        self.spin_ir_a_desicion.setValue(propiedades.get("Ir_a_desicion", 0))
-        layout_operacion.addRow("Ir a decisión:", self.spin_ir_a_desicion)
-        
-        # --- MOVIDO: Tipo carga/descarga ahora está en Operación ---
-        tipo_layout = QHBoxLayout()
-        self.spin_tipo_carga = QSpinBox()
-        self.spin_tipo_carga.setRange(0, 3)
-        self.spin_tipo_carga.setValue(propiedades.get("tipo_carga_descarga", 0))
-
-        tipo_layout.addWidget(self.spin_tipo_carga)
-        tipo_layout.addStretch()
-        
-        # Conectar el cambio de valor para actualizar la descripción
-        self.spin_tipo_carga.valueChanged.connect(self._actualizar_descripcion_tipo)
-        
-        layout_operacion.addRow("Tipo carga/descarga:", tipo_layout)
-        # -------------------------------------------------------------
-        
-        grupo_operacion.setLayout(layout_operacion)
-        scroll_layout.addWidget(grupo_operacion)
-        
-        # --- GRUPO 5: Configuración Playa ---
-        grupo_final = QGroupBox("Configuración Playa")
-        layout_final = QFormLayout()
-        layout_final.setLabelAlignment(Qt.AlignRight)
-        
-        self.spin_numero_playa = QSpinBox()
-        self.spin_numero_playa.setRange(0, 1000)
-        self.spin_numero_playa.setValue(propiedades.get("numero_playa", 0))
-        layout_final.addRow("Número playa:", self.spin_numero_playa)
-        
-        grupo_final.setLayout(layout_final)
-        scroll_layout.addWidget(grupo_final)
-        
-        # Agregar widget con scroll al layout principal
-        layout_principal.addWidget(scroll_widget)
-        
-        # Separador
+        # Separador y botones
         separador = QFrame()
         separador.setFrameShape(QFrame.HLine)
         separador.setFrameShadow(QFrame.Sunken)
-        separador.setStyleSheet("background-color: #555555;")
+        separador.setStyleSheet("background-color: #555555; margin: 5px 0px;")
         layout_principal.addWidget(separador)
         
-        # Botones
         botones_layout = QHBoxLayout()
         botones_layout.addStretch()
-        
         self.btn_aceptar = QPushButton("Aceptar")
         self.btn_cancelar = QPushButton("Cancelar")
-        
         self.btn_aceptar.setDefault(True)
         self.btn_aceptar.clicked.connect(self.accept)
         self.btn_cancelar.clicked.connect(self.reject)
-        
         botones_layout.addWidget(self.btn_aceptar)
         botones_layout.addWidget(self.btn_cancelar)
-        
         layout_principal.addLayout(botones_layout)
+        
         self.setLayout(layout_principal)
     
-    def _actualizar_descripcion_tipo(self, valor):
-        """Actualiza la descripción cuando cambia el valor"""
-        pass # Mantenido por si se implementa lógica futura
-    
     def obtener_propiedades(self):
-        """Devuelve un diccionario con los valores actuales"""
-        return {
-            "Pasillo": self.spin_pasillo.value(),
-            "Estanteria": self.spin_estanteria.value(),
-            "Altura": self.spin_altura.value(),
-            "Altura_en_mm": self.spin_altura_mm.value(),
-            "Punto_Pasillo": self.spin_punto_pasillo.value(),
-            "Punto_encarar": self.spin_punto_escara.value(),
-            "Punto_desaproximar": self.spin_punto_desapr.value(),
-            "FIFO": self.spin_fifo.value(),
-            "Nombre": self.edit_nombre.text(),
-            "Presicion": self.spin_presicion.value(),
-            "Ir_a_desicion": self.spin_ir_a_desicion.value(),
-            "numero_playa": self.spin_numero_playa.value(),
-            "tipo_carga_descarga": self.spin_tipo_carga.value()
-        }
+        """Devuelve un diccionario con los valores actuales de todos los widgets"""
+        resultado = {}
+        for clave, widget in self.widgets.items():
+            if isinstance(widget, QSpinBox):
+                valor = widget.value()
+            elif isinstance(widget, QDoubleSpinBox):
+                valor = widget.value()
+            else:
+                valor = widget.text()
+            resultado[clave] = valor
+        return resultado

@@ -1,6 +1,8 @@
+# -*- coding: utf-8 -*-
 import csv
 import os
 from PyQt5.QtWidgets import QFileDialog, QMessageBox
+from .schema import NODO_FIELDS, OBJETIVO_FIELDS
 
 class ExportadorCSV:
     @staticmethod
@@ -59,15 +61,11 @@ class ExportadorCSV:
 
         # --- CONTINUAR CON LA EXPORTACIÓN NORMAL ---
         try:
-            # --- Exportar puntos (nodos básicos) ---
+            # --- Exportar puntos (nodos básicos) usando el esquema ---
             with open(os.path.join(carpeta, "puntos.csv"), 'w', newline='', encoding='utf-8') as f:
-                campos_puntos = [
-                    'id', 'X', 'Y', 'objetivo', 'A', 'Vmax', 'Seguridad',
-                    'Seg_alto', 'Seg_tresD', 'Tipo_curva', 'Reloc',
-                    'decision', 'timeout', 'ultimo_metro', 'es_cargador',
-                    'Puerta_Abrir', 'Puerta_Cerrar', 'Punto_espera', 'es_curva'
-                ]
-                writer = csv.DictWriter(f, fieldnames=campos_puntos)
+                # Obtener los nombres de columna según el esquema
+                column_names = [info.get('csv_name', key) for key, info in NODO_FIELDS.items()]
+                writer = csv.DictWriter(f, fieldnames=column_names)
                 writer.writeheader()
 
                 for nodo in proyecto.nodos:
@@ -76,44 +74,25 @@ class ExportadorCSV:
                     else:
                         datos = nodo
 
-                    x_px = datos.get('X', 0)
-                    y_px = datos.get('Y', 0)
-                    x_m = x_px * escala
-                    y_m = y_px * escala
-
-                    fila = {
-                        'id': datos.get('id'),
-                        'X': x_m,
-                        'Y': y_m,
-                        'objetivo': datos.get('objetivo', 0),
-                        'A': datos.get('A', 0),
-                        'Vmax': datos.get('Vmax', 0),
-                        'Seguridad': datos.get('Seguridad', 0),
-                        'Seg_alto': datos.get('Seg_alto', 0),
-                        'Seg_tresD': datos.get('Seg_tresD', 0),
-                        'Tipo_curva': datos.get('Tipo_curva', 0),
-                        'Reloc': datos.get('Reloc', 0),
-                        'decision': datos.get('decision', 0),
-                        'timeout': datos.get('timeout', 0),
-                        'ultimo_metro': datos.get('ultimo_metro', 0),
-                        'es_cargador': datos.get('es_cargador', 0),
-                        'Puerta_Abrir': datos.get('Puerta_Abrir', 0),
-                        'Puerta_Cerrar': datos.get('Puerta_Cerrar', 0),
-                        'Punto_espera': datos.get('Punto_espera', 0),
-                        'es_curva': datos.get('es_curva', 0)
-                    }
+                    fila = {}
+                    for key, info in NODO_FIELDS.items():
+                        col_name = info.get('csv_name', key)
+                        valor = datos.get(key, info['default'])
+                        # Convertir coordenadas a metros
+                        if key == 'X':
+                            valor = valor * escala
+                        elif key == 'Y':
+                            valor = valor * escala
+                        fila[col_name] = valor
                     writer.writerow(fila)
 
-            # --- Exportar objetivos ---
+            # --- Exportar objetivos (solo nodos con objetivo != 0) ---
             if os.path.join(carpeta, "objetivos.csv") in rutas_a_generar:
                 with open(os.path.join(carpeta, "objetivos.csv"), 'w', newline='', encoding='utf-8') as f:
-                    campos_objetivos = [
-                        'nodo_id', 'objetivo', 'Pasillo', 'Estanteria', 'Altura',
-                        'Altura_en_mm', 'Punto_Pasillo', 'Punto_encarar', 'Punto_desaproximar',
-                        'FIFO', 'Nombre', 'Presicion', 'Ir_a_desicion', 'numero_playa',
-                        'tipo_carga_descarga'
-                    ]
-                    writer = csv.DictWriter(f, fieldnames=campos_objetivos)
+                    column_names = [info.get('csv_name', key) for key, info in OBJETIVO_FIELDS.items()]
+                    # Asegurarse de que 'nodo_id' esté al principio (lo añadimos manualmente)
+                    column_names = ['nodo_id'] + column_names
+                    writer = csv.DictWriter(f, fieldnames=column_names)
                     writer.writeheader()
 
                     for nodo in proyecto.nodos:
@@ -123,26 +102,14 @@ class ExportadorCSV:
                             datos = nodo
 
                         if datos.get('objetivo', 0) != 0:
-                            fila = {
-                                'nodo_id': datos.get('id'),
-                                'objetivo': datos.get('objetivo', 0),
-                                'Pasillo': datos.get('Pasillo', 0),
-                                'Estanteria': datos.get('Estanteria', 0),
-                                'Altura': datos.get('Altura', 0),
-                                'Altura_en_mm': datos.get('Altura_en_mm', 0),
-                                'Punto_Pasillo': datos.get('Punto_Pasillo', 0),
-                                'Punto_encarar': datos.get('Punto_Escara', 0),
-                                'Punto_desaproximar': datos.get('Punto_desapr', 0),
-                                'FIFO': datos.get('FIFO', 0),
-                                'Nombre': datos.get('Nombre', ''),
-                                'Presicion': datos.get('Presicion', 0),
-                                'Ir_a_desicion': datos.get('Ir_a_desicion', 0),
-                                'numero_playa': datos.get('numero_playa', 0),
-                                'tipo_carga_descarga': datos.get('tipo_carga_descarga', 0)
-                            }
+                            fila = {'nodo_id': datos.get('id')}
+                            for key, info in OBJETIVO_FIELDS.items():
+                                col_name = info.get('csv_name', key)
+                                valor = datos.get(key, info['default'])
+                                fila[col_name] = valor
                             writer.writerow(fila)
 
-            # --- Exportar rutas ---
+            # --- Exportar rutas (estructura fija, no usa esquema) ---
             with open(os.path.join(carpeta, "rutas.csv"), 'w', newline='', encoding='utf-8') as f:
                 campos_rutas = ['origen_id', 'destino_id', 'visitados']
                 writer = csv.DictWriter(f, fieldnames=campos_rutas)
@@ -180,7 +147,7 @@ class ExportadorCSV:
                         'visitados': visitados_str
                     })
 
-            # --- Exportar parámetros de playa ---
+            # --- Exportar parámetros de playa (dinámico, igual que antes) ---
             if os.path.join(carpeta, "playas.csv") in rutas_a_generar:
                 parametros_playa = getattr(proyecto, 'parametros_playa', [])
                 if parametros_playa:
@@ -210,7 +177,7 @@ class ExportadorCSV:
                         for clave, valor in parametros.items():
                             writer.writerow({'clave': clave, 'valor': str(valor)})
 
-            # --- Exportar tipo_carga_descarga ---
+            # --- Exportar tipo_carga_descarga (dinámico, igual que antes) ---
             if os.path.join(carpeta, "tipo_carga_descarga.csv") in rutas_a_generar:
                 parametros_carga_descarga = getattr(proyecto, 'parametros_carga_descarga', [])
                 if parametros_carga_descarga:

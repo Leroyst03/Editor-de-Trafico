@@ -1,6 +1,21 @@
+from .schema import NODO_FIELDS, OBJETIVO_FIELDS
+
 class Nodo:
-    def __init__(self, datos: dict):
-        self._datos = datos.copy()
+    def __init__(self, datos: dict = None):
+        """
+        Inicializa un nodo con los valores del esquema.
+        Si se pasa un diccionario, se sobreescriben los valores por defecto.
+        """
+        self._datos = {}
+        # Cargar valores por defecto de NODO_FIELDS
+        for key, info in NODO_FIELDS.items():
+            self._datos[key] = info['default']
+        # También los campos de objetivo (aunque sean 0 por defecto)
+        for key, info in OBJETIVO_FIELDS.items():
+            self._datos[key] = info['default']
+
+        if datos:
+            self._datos.update(datos)
 
     def get(self, clave, default=None):
         return self._datos.get(clave, default)
